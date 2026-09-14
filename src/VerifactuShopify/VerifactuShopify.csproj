@@ -9,10 +9,7 @@
 
   <ItemGroup>
     <!-- Versión exacta: solo se usan versiones con declaración responsable publicada por el autor (ver README). -->
-    <PackageReference Include="VeriFactu" Version="[1.0.65]" />
-    <!-- VeriFactu 1.0.65 arrastra la 9.0.16, con CVE-2026-47302/47304/50525/50527/50648. Se fuerza el parche
-         de la misma versión mayor. Quitar cuando el autor publique una versión con la dependencia corregida. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
+    <PackageReference Include="VeriFactu" Version="[1.0.66]" />
   </ItemGroup>
 
 </Project>
