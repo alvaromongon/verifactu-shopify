@@ -1,0 +1,15 @@
+# Compilación
+bin/
+obj/
+
+# IDE
+.vs/
+.idea/
+*.user
+
+# Certificados y secretos: nunca en el repositorio
+*.pfx
+*.p12
+*.pem
+*.key
+.env

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VerifactuShopify/VerifactuShopify.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VerifactuShopify.Tests/VerifactuShopify.Tests.csproj" />
+  </Folder>
+</Solution>
