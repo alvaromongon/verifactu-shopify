@@ -16,4 +16,6 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+      # VeriFactu crea /usr/share/VeriFactu al iniciarse y falla si no tiene permisos (mdiago/VeriFactu#273).
+      - run: sudo install -d -o "$USER" /usr/share/VeriFactu
       - run: dotnet test
