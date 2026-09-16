@@ -42,21 +42,39 @@ Los tests no necesitan certificado ni salen a la AEAT: los que cargan un `.pfx` 
 
 ## Certificado
 
-La AEAT solo acepta certificados de una autoridad reconocida, también en preproducción; uno autofirmado se rechaza. En local, la ruta del `.pfx` y su contraseña van en `dotnet user-secrets`, fuera del repositorio:
+La AEAT solo acepta certificados de una autoridad reconocida, también en preproducción; uno autofirmado se rechaza. En local, la configuración va en `dotnet user-secrets`, fuera del repositorio. Hay dos formas de indicar el certificado; usa solo una:
 
-```bash
-dotnet user-secrets set "VeriFactu:CertificatePath" "/ruta/al/certificado.pfx" --project src/VerifactuShopify
-```
+- **Instalado en el llavero de macOS (recomendado en local):** por su huella SHA-1, sin fichero ni contraseña. `security find-identity -v -p ssl-client` lista las huellas.
 
-```bash
-dotnet user-secrets set "VeriFactu:CertificatePassword" "contraseña" --project src/VerifactuShopify
-```
+  ```bash
+  dotnet user-secrets set "VeriFactu:CertificateThumbprint" "<huella>" --project src/VerifactuShopify
+  ```
 
-Para comprobar que se carga, sin enviar nada:
+- **Fichero `.pfx`:** `VeriFactu:CertificatePath` con la ruta y `VeriFactu:CertificatePassword` con la contraseña.
+
+Para enviar hacen falta también el emisor de las facturas y el productor del sistema informático. Sin estos últimos, la librería declararía como productor a Irene Solutions, la autora de la librería. En preproducción, con un certificado personal, usa tu propio NIF en ambos para evitar el error 4112:
+
+| Clave | Valor |
+|---|---|
+| `VeriFactu:Emisor:NIF` / `VeriFactu:Emisor:Nombre` | Obligado a expedir la factura |
+| `VeriFactu:SistemaInformatico:NIF` / `…:NombreRazon` | Productor del SIF |
+| `VeriFactu:SistemaInformatico:NumeroInstalacion` | Identificador de esta instalación |
+
+Comandos, todos solo contra preproducción:
 
 ```bash
 dotnet run --project src/VerifactuShopify -- certificado
 ```
+
+```bash
+dotnet run --project src/VerifactuShopify -- enviar-f2
+```
+
+```bash
+dotnet run --project src/VerifactuShopify -- anular <numserie> <dd-mm-aaaa>
+```
+
+`certificado` no envía nada. `enviar-f2` y `anular` escriben en la cadena de bloques local y la primera vez macOS pide permiso para usar la clave del llavero.
 
 ## Datos locales de VeriFactu
 
