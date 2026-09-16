@@ -7,6 +7,7 @@ namespace VerifactuShopify.Tests;
 
 // Usa certificados autofirmados creados en el propio test. La AEAT los rechaza,
 // pero sirven para probar la carga del .pfx sin un certificado real.
+// No instala nada en el almacén de certificados del usuario.
 [Collection(VeriFactuSettingsCollection.Name)]
 public sealed class CertificateSetupTests : IDisposable
 {
@@ -15,11 +16,13 @@ public sealed class CertificateSetupTests : IDisposable
     readonly string _dir = Directory.CreateTempSubdirectory("verifactu-cert-").FullName;
     readonly string? _originalPath = Settings.Current.CertificatePath;
     readonly string? _originalPassword = Settings.Current.CertificatePassword;
+    readonly string? _originalThumbprint = Settings.Current.CertificateThumbprint;
 
     public void Dispose()
     {
         Settings.Current.CertificatePath = _originalPath;
         Settings.Current.CertificatePassword = _originalPassword;
+        Settings.Current.CertificateThumbprint = _originalThumbprint;
         Directory.Delete(_dir, recursive: true);
     }
 
@@ -34,12 +37,13 @@ public sealed class CertificateSetupTests : IDisposable
         return path;
     }
 
-    static IConfiguration Configuration(string? path, string? password) =>
+    static IConfiguration Configuration(string? path, string? password, string? thumbprint = null) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 [CertificateSetup.PathKey] = path,
                 [CertificateSetup.PasswordKey] = password,
+                [CertificateSetup.ThumbprintKey] = thumbprint,
             })
             .Build();
 
@@ -53,14 +57,36 @@ public sealed class CertificateSetupTests : IDisposable
         Assert.Equal("CN=PRUEBA AUTOFIRMADO", certificate.Subject);
         Assert.True(certificate.HasPrivateKey);
         Assert.Equal(path, Settings.Current.CertificatePath);
+        Assert.Equal("", Settings.Current.CertificateThumbprint);
     }
 
     [Fact]
-    public void Missing_path_explains_how_to_set_it()
+    public void Missing_certificate_explains_how_to_set_it()
     {
         var ex = Assert.Throws<InvalidOperationException>(() => CertificateSetup.Configure(Configuration(null, null)));
 
         Assert.Contains("dotnet user-secrets set", ex.Message);
+    }
+
+    [Fact]
+    public void Path_and_thumbprint_together_are_rejected()
+    {
+        var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => CertificateSetup.Configure(Configuration(path, Password, new string('0', 40))));
+
+        Assert.Contains("no los dos", ex.Message);
+    }
+
+    [Fact]
+    public void Unknown_thumbprint_fails_clearly()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => CertificateSetup.Configure(Configuration(null, null, new string('0', 40))));
+
+        Assert.Contains(CertificateSetup.ThumbprintKey, ex.Message);
+        Assert.Equal("", Settings.Current.CertificatePath);
     }
 
     [Fact]
