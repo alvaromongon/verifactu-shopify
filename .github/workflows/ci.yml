@@ -10,12 +10,19 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      # VeriFactu crea /usr/share/VeriFactu al iniciarse y falla si no tiene permisos (mdiago/VeriFactu#273).
-      - run: sudo install -d -o "$USER" /usr/share/VeriFactu
+      # VeriFactu crea su carpeta de datos al iniciarse. En Linux es /usr/share/VeriFactu, donde el
+      # usuario del runner no puede escribir (mdiago/VeriFactu#273). En macOS y Windows está dentro
+      # del perfil del usuario y la crea la propia librería.
+      - if: runner.os == 'Linux'
+        run: sudo install -d -o "$USER" /usr/share/VeriFactu
       - run: dotnet test
