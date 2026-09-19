@@ -31,6 +31,7 @@ Nada de lo que hay aquí es asesoramiento fiscal. Consulta con tu asesor antes d
 ## Requisitos
 
 - .NET 10 SDK
+- Linux, macOS o Windows. CI prueba los tres en cada cambio.
 
 ## Compilar y probar
 
@@ -84,6 +85,7 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 |---|---|
 | macOS | `~/Library/Application Support/VeriFactu` |
 | Linux | `/usr/share/VeriFactu` |
+| Windows | `C:\ProgramData\VeriFactu` |
 
 - En Linux el usuario que ejecuta la aplicación necesita permiso de escritura en esa carpeta ([mdiago/VeriFactu#273](https://github.com/mdiago/VeriFactu/issues/273)). CI la crea antes de los tests.
 - La cadena de bloques encadena cada registro con el anterior: esa carpeta tiene que sobrevivir a despliegues y copias de seguridad.
