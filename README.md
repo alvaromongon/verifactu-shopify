@@ -77,6 +77,22 @@ dotnet run --project src/VerifactuShopify -- anular <numserie> <dd-mm-aaaa>
 
 `certificado` no envía nada. `enviar-f2` y `anular` escriben en la cadena de bloques local y la primera vez macOS pide permiso para usar la clave del llavero.
 
+## Despliegue
+
+En un despliegue el certificado no sale del almacén del sistema: llega como **fichero de secreto**, se carga en memoria y se le entrega a la librería sin instalarlo ni copiarlo a ninguna parte. La configuración va por variables de entorno, que tienen prioridad sobre `dotnet user-secrets`:
+
+| Variable | Valor |
+|---|---|
+| `VeriFactu__CertificatePath` | Ruta al `.pfx` montado |
+| `VeriFactu__CertificatePasswordPath` | Ruta al fichero con su contraseña |
+| `VeriFactu__CertificatePassword` | Alternativa a la anterior, pero el entorno de un proceso se filtra con más facilidad que un fichero |
+
+Cualquier plataforma sabe entregar un fichero a un proceso: un Secret montado en Kubernetes, `secrets` en Docker, `LoadCredential=` en systemd, el agente de Vault o el CSI driver de cualquier nube. Así no hace falta el SDK de ningún proveedor.
+
+**Solo en Linux la clave privada no llega a tocar el disco.** Se carga con `EphemeralKeySet`, que macOS no admite —no sabe cargar una clave sin un llavero, y eso exige escribir— y que en Windows impide autenticarse contra la AEAT. En esos dos sistemas la clave pasa por el almacén del usuario y se borra al liberar el certificado: sirven para desarrollo, no para el despliegue.
+
+El proceso avisa por la salida de error cuando al certificado le quedan 30 días o menos, y falla si ya ha caducado. La AEAT no avisa.
+
 ## Datos locales de VeriFactu
 
 La librería guarda su configuración, la cadena de bloques y los registros en una carpeta fija que no se puede cambiar, y la crea en cuanto se usa:
@@ -89,6 +105,7 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 
 - En Linux el usuario que ejecuta la aplicación necesita permiso de escritura en esa carpeta ([mdiago/VeriFactu#273](https://github.com/mdiago/VeriFactu/issues/273)). CI la crea antes de los tests.
 - La cadena de bloques encadena cada registro con el anterior: esa carpeta tiene que sobrevivir a despliegues y copias de seguridad.
+- La librería escribe y lee esas fechas con la configuración regional del proceso, así que la aplicación la fija a `es-ES`. Sin eso, una cadena escrita en una máquina no se puede leer en otra: un contenedor con la configuración invariante lee `17/09/2026` como mes 17 y falla al iniciarse.
 
 ## Seguridad
 
