@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Configuration;
 using VeriFactu.Config;
+using VeriFactu.Net;
 
 namespace VerifactuShopify.Tests;
 
@@ -20,6 +21,7 @@ public sealed class CertificateSetupTests : IDisposable
 
     public void Dispose()
     {
+        Wsd.Certificate = null!;
         Settings.Current.CertificatePath = _originalPath;
         Settings.Current.CertificatePassword = _originalPassword;
         Settings.Current.CertificateThumbprint = _originalThumbprint;
@@ -56,8 +58,89 @@ public sealed class CertificateSetupTests : IDisposable
 
         Assert.Equal("CN=PRUEBA AUTOFIRMADO", certificate.Subject);
         Assert.True(certificate.HasPrivateKey);
-        Assert.Equal(path, Settings.Current.CertificatePath);
-        Assert.Equal("", Settings.Current.CertificateThumbprint);
+
+        // La librería lo recibe ya cargado y la contraseña no queda en Settings, que es lo que
+        // Settings.Save() serializaría en claro.
+        Assert.Same(certificate, Wsd.Certificate);
+        Assert.Equal("", Settings.Current.CertificatePassword);
+    }
+
+    [Fact]
+    public void Reads_the_password_from_a_file()
+    {
+        var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+        var passwordPath = Path.Combine(_dir, "prueba.pass");
+        File.WriteAllText(passwordPath, Password + Environment.NewLine);
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [CertificateSetup.PathKey] = path,
+                [CertificateSetup.PasswordPathKey] = passwordPath,
+            })
+            .Build();
+
+        using var certificate = CertificateSetup.Configure(configuration);
+
+        Assert.True(certificate.HasPrivateKey);
+    }
+
+    [LinuxOnlyFact]
+    public void Loading_the_pfx_writes_nothing_to_disk()
+    {
+        var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+        var watched = new[] { Path.GetTempPath(), VeriFactu.Config.Settings.Path };
+        var before = Snapshot(watched);
+
+        using var certificate = CertificateSetup.Configure(Configuration(path, Password));
+
+        Assert.True(certificate.HasPrivateKey);
+        Assert.Empty(Snapshot(watched).Except(before));
+    }
+
+    static string[] Snapshot(IEnumerable<string> roots) =>
+        roots.Where(Directory.Exists)
+            .SelectMany(root => Directory.GetFileSystemEntries(root, "*", SearchOption.AllDirectories))
+            .ToArray();
+
+    [Fact]
+    public void Warns_before_the_certificate_expires()
+    {
+        var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(CertificateSetup.WarningDays - 1));
+        var error = new StringWriter();
+        var original = Console.Error;
+        Console.SetError(error);
+
+        try
+        {
+            using var certificate = CertificateSetup.Configure(Configuration(path, Password));
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+
+        Assert.Contains("caduca el", error.ToString());
+    }
+
+    [Fact]
+    public void Does_not_warn_for_a_certificate_with_time_left()
+    {
+        var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(CertificateSetup.WarningDays + 30));
+        var error = new StringWriter();
+        var original = Console.Error;
+        Console.SetError(error);
+
+        try
+        {
+            using var certificate = CertificateSetup.Configure(Configuration(path, Password));
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+
+        Assert.Equal("", error.ToString());
     }
 
     [Fact]

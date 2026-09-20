@@ -26,3 +26,31 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo install -d -o "$USER" /usr/share/VeriFactu
       - run: dotnet test
+
+  # La forma que tendrá el despliegue: contenedor Linux, certificado entregado como fichero de
+  # secreto y configuración por variables de entorno. Es lo que la matriz anterior no cubre.
+  despliegue:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/dotnet/sdk:10.0
+    steps:
+      - uses: actions/checkout@v7
+      # Autofirmado: la AEAT lo rechazaría, pero aquí solo se comprueba cómo llega el certificado.
+      - name: Prepara el secreto
+        run: |
+          mkdir -p /run/secrets
+          openssl req -x509 -newkey rsa:2048 -nodes -days 400 -subj "/CN=PRUEBA AUTOFIRMADO" \
+            -keyout /tmp/clave.pem -out /tmp/certificado.pem
+          head -c 32 /dev/urandom | base64 | tr -d '\n' > /run/secrets/certificado.pass
+          chmod 400 /run/secrets/certificado.pass
+          openssl pkcs12 -export -inkey /tmp/clave.pem -in /tmp/certificado.pem \
+            -out /run/secrets/certificado.pfx -passout file:/run/secrets/certificado.pass
+          rm /tmp/clave.pem /tmp/certificado.pem
+      # Antes de los tests: así se comprueba que comprobar el certificado no crea la carpeta de datos.
+      - name: Carga el certificado desde el secreto
+        env:
+          VeriFactu__CertificatePath: /run/secrets/certificado.pfx
+          VeriFactu__CertificatePasswordPath: /run/secrets/certificado.pass
+        run: |
+          dotnet run --project src/VerifactuShopify -- certificado
+          test ! -d /usr/share/VeriFactu
+      - run: dotnet test

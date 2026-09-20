@@ -10,7 +10,12 @@ const string SellerNifKey = "VeriFactu:Emisor:NIF";
 const string SellerNameKey = "VeriFactu:Emisor:Nombre";
 const string DateFormat = "dd-MM-yyyy";
 
-var configuration = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
+// Antes de tocar nada de VeriFactu: la cultura decide cómo se lee la cadena de bloques.
+CultureSetup.Configure();
+
+// Las variables de entorno van después para que el despliegue pueda inyectar el certificado
+// sobre lo que haya en user-secrets (VeriFactu__CertificatePath, VeriFactu__CertificatePasswordPath).
+var configuration = new ConfigurationBuilder().AddUserSecrets<Program>().AddEnvironmentVariables().Build();
 
 try
 {
@@ -42,7 +47,7 @@ int PrintUsage()
 
 int CheckCertificate()
 {
-    using var certificate = CertificateSetup.Configure(configuration);
+    var certificate = CertificateSetup.Configure(configuration);
     Console.WriteLine($"Titular: {certificate.Subject}");
     Console.WriteLine($"Emisor:  {certificate.Issuer}");
     Console.WriteLine($"Caduca:  {certificate.NotAfter:yyyy-MM-dd}");
@@ -92,7 +97,8 @@ void PrepareSend()
     if (!endpoint.StartsWith("https://prewww", StringComparison.Ordinal))
         throw new InvalidOperationException($"El endpoint configurado no es de preproducción: {endpoint}");
 
-    using var certificate = CertificateSetup.Configure(configuration);
+    // Sin using: la librería lo usa en el envío, a través de Wsd.Certificate.
+    var certificate = CertificateSetup.Configure(configuration);
     SistemaInformaticoSetup.Configure(configuration);
 
     Console.WriteLine($"Endpoint:    {endpoint}");
