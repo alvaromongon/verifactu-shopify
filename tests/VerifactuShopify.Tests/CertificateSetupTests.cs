@@ -89,19 +89,29 @@ public sealed class CertificateSetupTests : IDisposable
     public void Loading_the_pfx_writes_nothing_to_disk()
     {
         var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
-        var watched = new[] { Path.GetTempPath(), VeriFactu.Config.Settings.Path };
-        var before = Snapshot(watched);
+        var before = Snapshot();
 
         using var certificate = CertificateSetup.Configure(Configuration(path, Password));
 
         Assert.True(certificate.HasPrivateKey);
-        Assert.Empty(Snapshot(watched).Except(before));
+        Assert.Empty(Snapshot().Except(before));
     }
 
-    static string[] Snapshot(IEnumerable<string> roots) =>
-        roots.Where(Directory.Exists)
-            .SelectMany(root => Directory.GetFileSystemEntries(root, "*", SearchOption.AllDirectories))
-            .ToArray();
+    // El directorio temporal sin recorrer subcarpetas: es donde cae el llavero que macOS necesita
+    // para cargar la clave, y recorrer /tmp entero tropieza con directorios ajenos ilegibles.
+    // La carpeta de datos de la librería sí entera, que es la que no debe recibir copias.
+    static string[] Snapshot()
+    {
+        var options = new EnumerationOptions { IgnoreInaccessible = true };
+        var temp = Directory.GetFileSystemEntries(Path.GetTempPath(), "*", options);
+
+        options = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true };
+        var data = Directory.Exists(VeriFactu.Config.Settings.Path)
+            ? Directory.GetFileSystemEntries(VeriFactu.Config.Settings.Path, "*", options)
+            : [];
+
+        return [.. temp, .. data];
+    }
 
     [Fact]
     public void Warns_before_the_certificate_expires()
