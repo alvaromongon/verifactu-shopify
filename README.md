@@ -43,7 +43,20 @@ Los tests no necesitan certificado ni salen a la AEAT: los que cargan un `.pfx` 
 
 ## Certificado
 
-La AEAT solo acepta certificados de una autoridad reconocida, también en preproducción; uno autofirmado se rechaza. En local, la configuración va en `dotnet user-secrets`, fuera del repositorio. Hay dos formas de indicar el certificado; usa solo una:
+La AEAT solo acepta certificados de una autoridad reconocida, también en preproducción; uno autofirmado se rechaza. Además, el titular del certificado tiene que ser una de estas figuras o el envío se rechaza con **error 4112** ([preguntas técnicas frecuentes de la AEAT](https://sede.agenciatributaria.gob.es/Sede/impuestos-tasas/iva/iva-libros-registro-iva-traves-aeat/preguntas-tecnicas-frecuentes.html)):
+
+| Titular | Notas |
+|---|---|
+| El obligado tributario | Certificado de persona física a su propio nombre |
+| Un apoderado para el trámite | Mediante el apoderamiento **IZ860** («Remisión y consulta de registros de facturación por servicio web»). IZ862 e IZ863 son para la app gratuita de la AEAT y no sirven para un programa externo |
+| Un colaborador social | — |
+| Un sucesor | — |
+
+Sirven tanto los certificados de persona física y de representante como los **sellos electrónicos de persona jurídica** (tipo 4 y 8 en @firma), que la AEAT menciona expresamente para procesos automatizados de máquina a máquina. Para un despliegue desatendido, un sello tiene la ventaja de no exponer la identidad de ninguna persona física; la elección concreta es de quien despliega este conector, no de este repositorio.
+
+De quién es el certificado en cada despliegue es una decisión de la empresa que lo despliega, no de este repositorio: aquí solo se documenta lo que el sistema acepta.
+
+En local, la configuración va en `dotnet user-secrets`, fuera del repositorio. Hay dos formas de indicar el certificado; usa solo una:
 
 - **Instalado en el llavero de macOS (recomendado en local):** por su huella SHA-1, sin fichero ni contraseña. `security find-identity -v -p ssl-client` lista las huellas.
 
