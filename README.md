@@ -75,7 +75,19 @@ dotnet run --project src/VerifactuShopify -- enviar-f2
 dotnet run --project src/VerifactuShopify -- anular <numserie> <dd-mm-aaaa>
 ```
 
-`certificado` no envía nada. `enviar-f2` y `anular` escriben en la cadena de bloques local y la primera vez macOS pide permiso para usar la clave del llavero.
+```bash
+dotnet run --project src/VerifactuShopify -- consultar <aaaa> <mm>
+```
+
+```bash
+dotnet run --project src/VerifactuShopify -- cadena
+```
+
+`certificado` no envía nada, y `consultar` y `cadena` solo leen de la AEAT. La primera vez que un comando habla con la AEAT, macOS pide permiso para usar la clave del llavero. Si no se concede a tiempo, la conexión falla con un timeout.
+
+- **`consultar`** lista lo que la AEAT tiene del emisor en un mes: por cada factura, su último registro con su huella y su encadenamiento.
+- **`cadena`** muestra el último registro de la cadena según la AEAT y el local, y termina con error si no coinciden.
+- **`enviar-f2` y `anular`** leen primero la cadena de la AEAT (ver [Cadena de registros](#cadena-de-registros)).
 
 ## Despliegue
 
@@ -93,6 +105,18 @@ Cualquier plataforma sabe entregar un fichero a un proceso: un Secret montado en
 
 El proceso avisa por la salida de error cuando al certificado le quedan 30 días o menos, y falla si ya ha caducado. La AEAT no avisa.
 
+**Huso horario:** los registros se fechan con la hora local del proceso, que tiene que ser la del territorio desde el que se expiden las facturas (art. 7.e de la Orden HAC/1177/2024). Un contenedor usa UTC si no se indica otra cosa: hay que arrancarlo con `TZ=Europe/Madrid` (o `Atlantic/Canary`) y con los datos de zonas horarias, que las imágenes `mcr.microsoft.com/dotnet/runtime` ya traen. Los comandos de envío muestran el huso que están usando.
+
+## Cadena de registros
+
+Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de esa cadena: antes de enviar o anular, el conector consulta el último registro de su sistema informático en el mes actual y en el anterior, y continúa desde él. Así el despliegue no necesita guardar estado entre ejecuciones (decisión en [#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
+
+- **Sin cadena local** (un contenedor recién creado), se carga la de la AEAT. La carpeta de cadenas tiene que estar vacía.
+- **Con cadena local** (desarrollo), solo se comprueba que coincide con la de la AEAT. Si no coincide, no se envía nada. Pasa, por ejemplo, después de enviar desde otra máquina. Si la AEAT tiene razón, basta con mover la carpeta `Blockchains` de los datos locales.
+- **El mismo NIF puede facturar desde otros sistemas**, como el TPV de Shopify, y cada uno tiene su propia cadena. El conector solo mira los registros de su sistema: el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`. Por eso el número de instalación tiene que ser fijo y no repetirse nunca.
+- **Solo se anulan facturas del mes actual o del anterior**, que son los dos meses que se consultan. Lo más antiguo se corrige con una rectificativa.
+- **Dos ejecuciones a la vez para el mismo emisor romperían la cadena.** Hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)), no puede haber más de una a la vez.
+
 ## Datos locales de VeriFactu
 
 La librería guarda su configuración, la cadena de bloques y los registros en una carpeta fija que no se puede cambiar, y la crea en cuanto se usa:
@@ -104,7 +128,7 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 | Windows | `C:\ProgramData\VeriFactu` |
 
 - En Linux el usuario que ejecuta la aplicación necesita permiso de escritura en esa carpeta ([mdiago/VeriFactu#273](https://github.com/mdiago/VeriFactu/issues/273)). CI la crea antes de los tests.
-- La cadena de bloques encadena cada registro con el anterior: esa carpeta tiene que sobrevivir a despliegues y copias de seguridad.
+- En modalidad VERI\*FACTU no hace falta conservar esa carpeta: los registros ya los tiene la AEAT, y la cadena se lee de ella en cada envío. En desarrollo, si se conserva, tiene que coincidir con la de la AEAT.
 - La librería escribe y lee esas fechas con la configuración regional del proceso, así que la aplicación la fija a `es-ES`. Sin eso, una cadena escrita en una máquina no se puede leer en otra: un contenedor con la configuración invariante lee `17/09/2026` como mes 17 y falla al iniciarse.
 
 ## Seguridad

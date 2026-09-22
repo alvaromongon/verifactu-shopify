@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
+using VeriFactu.Blockchain;
 using VeriFactu.Business;
 using VeriFactu.Business.Operations;
 using VeriFactu.Config;
@@ -27,6 +28,7 @@ try
         ["anular", var invoiceId, var invoiceDate] =>
             Cancel(invoiceId, DateTime.ParseExact(invoiceDate, DateFormat, CultureInfo.InvariantCulture)),
         ["consultar", var year, var month] => Query(year, month),
+        ["cadena"] => ShowChain(),
         _ => PrintUsage(),
     };
 }
@@ -46,6 +48,7 @@ int PrintUsage()
           enviar-f2                      envía una factura simplificada de prueba a preproducción
           anular <numserie> <dd-mm-aaaa>  anula un registro enviado a preproducción
           consultar <aaaa> <mm>          lista lo que la AEAT tiene del emisor en ese periodo, sin enviar nada
+          cadena                         muestra el último registro de la cadena según la AEAT y el local, sin enviar nada
         """);
     return 1;
 }
@@ -62,6 +65,7 @@ int CheckCertificate()
 int SendF2()
 {
     PrepareSend();
+    LoadChainFromAeat();
     var invoice = new Invoice($"M1-F2-{DateTime.Now:yyyyMMddHHmmss}", DateTime.Today, configuration.GetRequired(SellerNifKey))
     {
         InvoiceType = TipoFactura.F2,
@@ -84,6 +88,7 @@ int SendF2()
 int Cancel(string invoiceId, DateTime invoiceDate)
 {
     PrepareSend();
+    LoadChainFromAeat();
     var invoice = new Invoice(invoiceId, invoiceDate, configuration.GetRequired(SellerNifKey))
     {
         SellerName = configuration.GetRequired(SellerNameKey),
@@ -119,6 +124,26 @@ int Query(string year, string month)
     return 0;
 }
 
+int ShowChain()
+{
+    PrepareSend();
+    var sellerNif = configuration.GetRequired(SellerNifKey);
+    var head = BlockchainSetup.QueryHead(sellerNif, configuration.GetRequired(SellerNameKey),
+        Settings.Current.SistemaInformatico, DateTimeOffset.Now);
+    Console.WriteLine(head is null
+        ? "AEAT:        sin registros de este SIF en el mes actual ni en el anterior"
+        : $"AEAT:        {head.NumSerie} {head.FechaExpedicion} {head.Huella} (generado {head.GeneratedAt:O})");
+
+    // Sin tocar la cadena local si no existe: Blockchain.Get crearía su carpeta.
+    var local = File.Exists(Path.Combine(Settings.Current.BlockchainPath, sellerNif, $"_{sellerNif}.csv"))
+        ? Blockchain.Get(sellerNif).Current
+        : null;
+    Console.WriteLine(local is null
+        ? "Local:       sin cadena"
+        : $"Local:       {local.IDFactura.NumSerieFactura} {local.IDFactura.FechaExpedicionFactura} {local.Huella}");
+    return head?.Huella == local?.Huella ? 0 : 1;
+}
+
 void PrepareSend()
 {
     // M1 solo prueba contra preproducción: un Settings.xml local podría apuntar a producción.
@@ -132,6 +157,21 @@ void PrepareSend()
 
     Console.WriteLine($"Endpoint:    {endpoint}");
     Console.WriteLine($"Certificado: {certificate.Subject}");
+    // Los registros se fechan con la hora local del proceso, que tiene que ser la del territorio desde
+    // donde se expide (art. 7.e de la Orden HAC/1177/2024): en un contenedor, TZ=Europe/Madrid.
+    Console.WriteLine($"Huso:        {TimeZoneInfo.Local.Id} ({DateTimeOffset.Now:zzz})");
+}
+
+// Antes de crear ningún registro: la AEAT es la fuente de verdad de la cadena (#12).
+void LoadChainFromAeat()
+{
+    var sellerNif = configuration.GetRequired(SellerNifKey);
+    var head = BlockchainSetup.QueryHead(sellerNif, configuration.GetRequired(SellerNameKey),
+        Settings.Current.SistemaInformatico, DateTimeOffset.Now);
+    BlockchainSetup.Load(sellerNif, head);
+    Console.WriteLine(head is null
+        ? "Cadena:      vacía en la AEAT, el siguiente será el primer registro"
+        : $"Cadena:      {head.NumSerie} {head.Huella}");
 }
 
 static bool PrintResult(InvoiceEntry entry)
