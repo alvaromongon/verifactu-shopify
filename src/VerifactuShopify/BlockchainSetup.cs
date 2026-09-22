@@ -68,8 +68,8 @@ public static class BlockchainSetup
                 consulta.FiltroConsulta.ClavePaginacion = next;
                 // El mismo NIF puede facturar desde otros sistemas (el TPV de Shopify, por ejemplo), cada uno
                 // con su cadena. El filtro por SIF de la consulta no sirve: VeriFactu 1.0.66 serializa sus
-                // campos en el espacio de nombres equivocado y la AEAT responde 4102. Se pide el SIF de cada
-                // registro y se filtra aquí.
+                // campos en el espacio de nombres equivocado y la AEAT responde 4102 (mdiago/VeriFactu#292).
+                // Se pide el SIF de cada registro y se filtra aquí.
                 consulta.DatosAdicionalesRespuesta = new DatosAdicionalesRespuesta { MostrarSistemaInformatico = "S" };
 
                 var (respuesta, sifs) = Send(consulta);
@@ -88,7 +88,7 @@ public static class BlockchainSetup
 
     // Lo mismo que InvoiceQuery.GetDocuments, pero leyendo también el SIF de cada registro: VeriFactu 1.0.66
     // lo espera en el espacio de nombres de la respuesta y la AEAT lo manda con sus campos en el de
-    // SuministroInformacion, así que la librería lo deja vacío.
+    // SuministroInformacion, así que la librería lo deja vacío (mdiago/VeriFactu#292).
     static (RespuestaConsultaFactuSistemaFacturacion, List<XElement?>) Send(ConsultaFactuSistemaFacturacion consulta)
     {
         var xml = new XmlParser().GetBytes(new Envelope { Body = new Body { Registro = consulta } }, Namespaces.Items);
@@ -122,7 +122,8 @@ public static class BlockchainSetup
     }
 
     // Deja la cadena del emisor en la librería apuntando a la cabeza de la AEAT. Hay que llamarlo antes
-    // de crear ningún InvoiceEntry: la librería lee la cadena del disco una sola vez, al iniciarse.
+    // de crear ningún InvoiceEntry: la librería lee la cadena del disco una sola vez, al iniciarse. Sin
+    // una forma pública de fijar la cabeza, se escribe su fichero interno (propuesta en mdiago/VeriFactu#293).
     public static void Load(string sellerNif, ChainHead? head)
     {
         var blockchainPath = Settings.Current.BlockchainPath;
