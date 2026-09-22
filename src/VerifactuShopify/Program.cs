@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using VeriFactu.Business;
+using VeriFactu.Business.Operations;
 using VeriFactu.Config;
 using VeriFactu.Xml.Factu.Alta;
 using VerifactuShopify;
@@ -25,12 +26,15 @@ try
         ["enviar-f2"] => SendF2(),
         ["anular", var invoiceId, var invoiceDate] =>
             Cancel(invoiceId, DateTime.ParseExact(invoiceDate, DateFormat, CultureInfo.InvariantCulture)),
+        ["consultar", var year, var month] => Query(year, month),
         _ => PrintUsage(),
     };
 }
 catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or FormatException)
 {
-    Console.Error.WriteLine(ex.Message);
+    // WebException también es InvalidOperationException: sin la interna no se ve por qué falló el TLS.
+    for (var e = ex; e is not null; e = e.InnerException)
+        Console.Error.WriteLine(e.Message);
     return 1;
 }
 
@@ -41,6 +45,7 @@ int PrintUsage()
           certificado                    comprueba el certificado configurado, sin enviar nada
           enviar-f2                      envía una factura simplificada de prueba a preproducción
           anular <numserie> <dd-mm-aaaa>  anula un registro enviado a preproducción
+          consultar <aaaa> <mm>          lista lo que la AEAT tiene del emisor en ese periodo, sin enviar nada
         """);
     return 1;
 }
@@ -88,6 +93,30 @@ int Cancel(string invoiceId, DateTime invoiceDate)
     cancellation.Save();
 
     return PrintResult(cancellation) ? 0 : 1;
+}
+
+int Query(string year, string month)
+{
+    PrepareSend();
+    var query = new InvoiceQuery(configuration.GetRequired(SellerNifKey), configuration.GetRequired(SellerNameKey));
+    var response = query.GetSales(year, month);
+
+    Console.WriteLine($"Resultado: {response.ResultadoConsulta} (paginación: {response.IndicadorPaginacion})");
+    foreach (var registro in response.RegistroRespuestaConsultaFactuSistemaFacturacion ?? [])
+    {
+        var datos = registro.DatosRegistroFacturacion;
+        var anterior = datos?.Encadenamiento?.RegistroAnterior;
+        Console.WriteLine();
+        Console.WriteLine($"Factura:      {registro.IDFactura.NumSerieFactura} {registro.IDFactura.FechaExpedicionFactura}");
+        Console.WriteLine($"Estado:       {registro.EstadoRegistro?.EstadoReg} (modificado {registro.EstadoRegistro?.TimestampUltimaModificacion})");
+        Console.WriteLine($"Presentado:   {registro.DatosPresentacion?.TimestampPresentacion}");
+        Console.WriteLine($"Generado:     {datos?.FechaHoraHusoGenRegistro}");
+        Console.WriteLine($"Huella:       {datos?.Huella}");
+        Console.WriteLine(anterior is null
+            ? $"Anterior:     primer registro = {datos?.Encadenamiento?.PrimerRegistro}"
+            : $"Anterior:     {anterior.NumSerieFactura} {anterior.Huella}");
+    }
+    return 0;
 }
 
 void PrepareSend()
