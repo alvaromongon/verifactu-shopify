@@ -10,6 +10,9 @@ Consultadas el 22-09-2026.
 |---|---|---|
 | Real Decreto 1007/2023, Reglamento de requisitos de los SIF (RRSIF) | Consolidado, última actualización 03-12-2025 | [BOE-A-2023-24840](https://www.boe.es/buscar/act.php?id=BOE-A-2023-24840) |
 | Orden HAC/1177/2024, especificaciones técnicas | Consolidado, última actualización 28-10-2024 | [BOE-A-2024-22138](https://www.boe.es/buscar/act.php?id=BOE-A-2024-22138) |
+| Real Decreto 1619/2012, Reglamento de facturación (ROF) | Consolidado, última actualización 31-03-2026 | [BOE-A-2012-14696](https://www.boe.es/buscar/act.php?id=BOE-A-2012-14696) |
+| Ley 37/1992 del IVA (LIVA) | Consolidado | [BOE-A-1992-28740](https://www.boe.es/buscar/act.php?id=BOE-A-1992-28740) |
+| FAQ de la AEAT: sistemas VERI\*FACTU | Página actualizada 22-07-2026 | [sede.agenciatributaria.gob.es](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/sistemas-verifactu.html) |
 | FAQ de la AEAT: trazabilidad | Página actualizada 22-07-2026 | [sede.agenciatributaria.gob.es](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/caracteristicas-requisitos-sif-trazabilidad.html) |
 | FAQ de la AEAT: conservación, accesibilidad y legibilidad | Página actualizada 22-07-2026 | [sede.agenciatributaria.gob.es](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/caracteristicas-requisitos-sif-conservacion-accesibilidad-legibilidad.html) |
 | FAQ de la AEAT: integridad e inalterabilidad | Página actualizada 22-07-2026 | [sede.agenciatributaria.gob.es](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/caracteristicas-requisitos-sif-integridad-inalterabilidad.html) |
@@ -65,3 +68,23 @@ Descripción del servicio web, apartado 6.4:
 
 - **Control de flujo:** de entrada hay que esperar 60 segundos entre envíos, y la AEAT actualiza ese valor en cada respuesta. También se puede enviar antes si se completa el lote máximo (Orden, art. 16.2).
 - **Ante una incidencia:** hay que reintentar al menos una vez por hora, respetando el orden de generación, y marcar el envío como afectado por la incidencia (art. 16.4).
+
+## Plazos: del pedido a la AEAT
+
+Son dos tramos, regulados por normas distintas.
+
+**Del pedido a la expedición de la factura** (ROF y LIVA):
+
+- A un consumidor, la factura se expide «en el momento de realizarse la operación» (ROF, art. 11.1).
+- Si el destinatario es un empresario o profesional, basta con expedirla antes del día 16 del mes siguiente al devengo (art. 11.1, párrafo segundo).
+- El devengo de una entrega de bienes se produce con la puesta a disposición (LIVA, art. 75.Uno.1.º). Si se cobra por adelantado, como en una tienda online, se produce al cobrar, por el importe cobrado (art. 75.Dos).
+- La norma no da un margen en minutos. Cuánto retraso se admite entre el cobro y la expedición es una pregunta para un asesor.
+
+**De la expedición a la remisión** (RRSIF y FAQ):
+
+- El registro de alta se genera «de forma simultánea o inmediatamente anterior» a la expedición (RRSIF, art. 9).
+- La fecha de expedición coincide con la de generación del registro y, en general, con la de remisión (FAQ de sistemas VERI\*FACTU).
+- La remisión es inmediata, sin más espera que la del control de flujo. La FAQ lo aplica expresamente a tiendas que querrían enviar al cierre: no se puede.
+- La FAQ de desarrolladores (apartado 5) lo extiende a las arquitecturas con varios componentes: emisión con QR, generación del registro y remisión, «de forma simultánea e inmediata». No pueden quedar facturas sin registro ni registros sin remitir.
+- Con una incidencia (caída de la AEAT, red, corte de luz) no hay plazo máximo. Hay que reintentar al menos cada hora, marcar el envío con `Incidencia = S` y no interrumpir la facturación.
+- Si un envío no obtiene respuesta, se reenvían los mismos registros hasta obtenerla.
