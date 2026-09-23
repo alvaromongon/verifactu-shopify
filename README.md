@@ -126,7 +126,7 @@ dotnet run --project src/VerifactuShopify -- sincronizar
 | `Sincronizacion:Desde` | Fecha y hora de corte, p. ej. `2026-09-23T00:00:00+02:00`. Los pedidos cobrados antes no se facturan |
 | `Sincronizacion:MargenMinutos` | Espera desde el cobro antes de facturar. Por defecto, 10 |
 | `Facturacion:Prefijo` | Prefijo de la serie, solo letras y dígitos, p. ej. `PRE` |
-| `Facturacion:Semilla` | Opcional, `aaaa:n`: último número usado ese año fuera del conector |
+| `Facturacion:Semilla` | Opcional, `aaaa:n`: último número usado ese año fuera del conector. Solo si se continúa una serie existente (ver abajo) |
 | `Facturacion:LimiteSimplificada` | Importe máximo de una F2. Por defecto, 400 |
 
 ### Qué se factura
@@ -145,6 +145,9 @@ dotnet run --project src/VerifactuShopify -- sincronizar
 
   No gastan número. Vuelven a salir en cada ejecución hasta que se resuelvan.
 - **Serie propia**, `{prefijo}-{aaaa}-{nnnnnn}`, compartida por F1 y F2. Se reinicia cada año. El último número usado se lee de la AEAT.
+  - **Con una serie nueva no hace falta semilla**: empieza en 1. Es el caso de preproducción, con su propio prefijo.
+  - **Al pasar a producción hay que decidir** si se continúa la serie con la que la tienda ya facturaba o se abre una nueva. El Reglamento de facturación (RD 1619/2012, art. 6.1.a) exige numeración correlativa dentro de cada serie y admite series separadas «cuando existan razones que lo justifiquen». Consúltalo con tu asesor ([#4](https://github.com/alvaromongon/verifactu-shopify/issues/4#issuecomment-5796211394)).
+  - **Para continuar una serie existente**, `Facturacion:Semilla` indica el último número usado. El formato del número tiene que ser el mismo, y desde el corte toda venta tiene que entrar como pedido de Shopify, porque las ventas que no pasan por el conector gastarían números de la misma serie.
 - **Fecha de expedición**: el día en que se envía.
 
 ### Sin duplicados y sin estado
