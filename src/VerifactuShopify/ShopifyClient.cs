@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -9,6 +10,8 @@ public sealed class ShopifyClient
 {
     // Pinned so a new Shopify release can't change a response under the connector.
     public const string ApiVersion = "2026-07";
+
+    public const string RequiredScope = "read_orders";
 
     const int MaxThrottledRetries = 3;
 
@@ -86,12 +89,26 @@ public sealed class ShopifyClient
                 ["client_secret"] = clientSecret,
             }));
 
+        // A 404 is what an unknown shop gets, and the domain people know is usually the public one.
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw new InvalidOperationException(
+                $"Shopify no encuentra la tienda {shopDomain}. Tiene que ser su dominio *.myshopify.com, " +
+                "no el público: está en el admin de la tienda, en Configuración > Dominios.");
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(
                 $"Shopify no dio un token para {shopDomain} ({(int)response.StatusCode}). " +
                 "Revisa el client ID y el secreto, y que la app esté instalada en la tienda y sea de su misma organización.");
 
         var token = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        // The token only carries the scopes of the released app version the shop approved; without
+        // this check a missing scope surfaces later as a bare "Access denied for orders field".
+        var scopes = token.GetProperty("scope").GetString()?.Split(',') ?? [];
+        if (!scopes.Contains(RequiredScope))
+            throw new InvalidOperationException(
+                $"La app no tiene el permiso {RequiredScope} en {shopDomain} (tiene: {(scopes is [""] or [] ? "ninguno" : string.Join(", ", scopes))}). " +
+                "Añádelo a la versión de la app en el Dev Dashboard, publícala y apruébalo en la tienda.");
+
         return new ShopifyClient(http, shopDomain, token.GetProperty("access_token").GetString()!);
     }
 

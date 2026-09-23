@@ -114,14 +114,14 @@ dotnet run --project src/VerifactuShopify -- sincronizar
 ### App de Shopify
 
 - **Se crea en el [Dev Dashboard](https://dev.shopify.com)**, en la misma organización que la tienda, y se instala en ella.
-- **Solo pide `read_orders`** y ningún dato protegido de cliente. [`shopify.app.example.toml`](shopify.app.example.toml) es la plantilla. El `shopify.app.toml` real no se sube al repositorio.
+- **Solo pide `read_orders`** y ningún dato protegido de cliente. El permiso tiene que estar en una versión **publicada** de la app y aprobado en la tienda: si no, el token llega sin permisos y el conector lo indica. [`shopify.app.example.toml`](shopify.app.example.toml) es la plantilla. El `shopify.app.toml` real no se sube al repositorio.
 - **El token se pide en cada ejecución** con el client ID y el secreto ([client credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant)). No se guarda en ningún sitio. Esta vía solo funciona si la app y la tienda están en la misma organización.
 
 ### Configuración
 
 | Clave | Valor |
 |---|---|
-| `Shopify:Tienda` | Dominio `*.myshopify.com` de la tienda |
+| `Shopify:Tienda` | Dominio `*.myshopify.com` de la tienda, no el público. Está en el admin, en Configuración > Dominios |
 | `Shopify:ClientId` / `Shopify:ClientSecret` | Credenciales de la app en el Dev Dashboard |
 | `Sincronizacion:Desde` | Fecha y hora de corte, p. ej. `2026-09-23T00:00:00+02:00`. Los pedidos cobrados antes no se facturan |
 | `Sincronizacion:MargenMinutos` | Espera desde el cobro antes de facturar. Por defecto, 10 |
