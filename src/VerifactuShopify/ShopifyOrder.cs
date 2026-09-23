@@ -19,8 +19,11 @@ public sealed record ShopifyOrderLine(
 // type, decoupled from Shopify's GraphQL client: fetching the real order is a separate concern
 // from mapping it to an invoice (see issue #3). BuyerNif is null today for every order - no
 // checkout field collects it yet - but the mapper already supports it for when one does.
+// Id is the order's legacyResourceId, which never changes; Name is what the merchant sees
+// (#1001), which the shop can reformat. Both go into the invoice description (OrderReference).
 public sealed record ShopifyOrder(
     string Id,
+    string Name,
     DateTime InvoiceDate,
     bool TaxesIncluded,
     string? BuyerNif,

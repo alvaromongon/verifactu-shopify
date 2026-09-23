@@ -26,10 +26,12 @@ public static class BlockchainSetup
     // o del anterior, y todo lo demás lleva la fecha del día. La consulta no filtra por fecha de generación.
     public static IEnumerable<PeriodoImputacion> Periods(DateTimeOffset now)
     {
-        var previous = now.AddMonths(-1);
-        yield return new PeriodoImputacion { Ejercicio = $"{previous:yyyy}", Periodo = $"{previous:MM}" };
-        yield return new PeriodoImputacion { Ejercicio = $"{now:yyyy}", Periodo = $"{now:MM}" };
+        yield return Period(now.AddMonths(-1));
+        yield return Period(now);
     }
+
+    public static PeriodoImputacion Period(DateTimeOffset month) =>
+        new() { Ejercicio = $"{month:yyyy}", Periodo = $"{month:MM}" };
 
     // La consulta devuelve el último registro de cada factura (alta o anulación), así que la cabeza es
     // el más reciente. Con dos generados en el mismo segundo, es el que apunta al otro.
@@ -54,11 +56,18 @@ public static class BlockchainSetup
             head.IDFactura.NumSerieFactura, head.IDFactura.FechaExpedicionFactura, latest);
     }
 
-    public static ChainHead? QueryHead(string sellerNif, string sellerName, SistemaInformatico sistema, DateTimeOffset now)
+    public static ChainHead? QueryHead(string sellerNif, string sellerName, SistemaInformatico sistema, DateTimeOffset now) =>
+        FindHead(QueryRecords(sellerNif, sellerName, sistema, Periods(now)));
+
+    // Every registro this SIF sent for the seller in those periods, as the AEAT has it: the last
+    // registro of each invoice (alta or anulación). Besides the chain head, the sync reads from it
+    // which orders were already invoiced and the last invoice number used.
+    public static List<RegistroRespuestaConsultaFactuSistemaFacturacion> QueryRecords(
+        string sellerNif, string sellerName, SistemaInformatico sistema, IEnumerable<PeriodoImputacion> periods)
     {
         var query = new InvoiceQuery(sellerNif, sellerName);
         var registros = new List<RegistroRespuestaConsultaFactuSistemaFacturacion>();
-        foreach (var period in Periods(now))
+        foreach (var period in periods)
         {
             ClavePaginacion? next = null;
             do
@@ -83,7 +92,7 @@ public static class BlockchainSetup
             while (next is not null);
         }
 
-        return FindHead(registros);
+        return registros;
     }
 
     // Lo mismo que InvoiceQuery.GetDocuments, pero leyendo también el SIF de cada registro: VeriFactu 1.0.66

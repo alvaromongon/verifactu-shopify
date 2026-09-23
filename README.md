@@ -96,11 +96,64 @@ dotnet run --project src/VerifactuShopify -- consultar <aaaa> <mm>
 dotnet run --project src/VerifactuShopify -- cadena
 ```
 
+```bash
+dotnet run --project src/VerifactuShopify -- sincronizar
+```
+
 `certificado` no envía nada, y `consultar` y `cadena` solo leen de la AEAT. La primera vez que un comando habla con la AEAT, macOS pide permiso para usar la clave del llavero. Si no se concede a tiempo, la conexión falla con un timeout.
 
 - **`consultar`** lista lo que la AEAT tiene del emisor en un mes: por cada factura, su último registro con su huella y su encadenamiento.
 - **`cadena`** muestra el último registro de la cadena según la AEAT y el local, y termina con error si no coinciden.
 - **`enviar-f2` y `anular`** leen primero la cadena de la AEAT (ver [Cadena de registros](#cadena-de-registros)).
+- **`sincronizar`** envía los pedidos pagados de Shopify que aún no tengan registro (ver [Sincronización con Shopify](#sincronización-con-shopify)).
+
+## Sincronización con Shopify
+
+`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
+
+### App de Shopify
+
+- **Se crea en el [Dev Dashboard](https://dev.shopify.com)**, en la misma organización que la tienda, y se instala en ella.
+- **Solo pide `read_orders`** y ningún dato protegido de cliente. [`shopify.app.example.toml`](shopify.app.example.toml) es la plantilla. El `shopify.app.toml` real no se sube al repositorio.
+- **El token se pide en cada ejecución** con el client ID y el secreto ([client credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant)). No se guarda en ningún sitio. Esta vía solo funciona si la app y la tienda están en la misma organización.
+
+### Configuración
+
+| Clave | Valor |
+|---|---|
+| `Shopify:Tienda` | Dominio `*.myshopify.com` de la tienda |
+| `Shopify:ClientId` / `Shopify:ClientSecret` | Credenciales de la app en el Dev Dashboard |
+| `Sincronizacion:Desde` | Fecha y hora de corte, p. ej. `2026-09-23T00:00:00+02:00`. Los pedidos cobrados antes no se facturan |
+| `Sincronizacion:MargenMinutos` | Espera desde el cobro antes de facturar. Por defecto, 10 |
+| `Facturacion:Prefijo` | Prefijo de la serie, solo letras y dígitos, p. ej. `PRE` |
+| `Facturacion:Semilla` | Opcional, `aaaa:n`: último número usado ese año fuera del conector |
+| `Facturacion:LimiteSimplificada` | Importe máximo de una F2. Por defecto, 400 |
+
+### Qué se factura
+
+- **Un pedido se factura cuando**:
+  - está pagado;
+  - no está cancelado ni es de prueba;
+  - se cobró después de la fecha de corte;
+  - y ha pasado el margen.
+- **Un reembolso anterior a la factura la deja fuera.** Esos pedidos llegarán con [#5](https://github.com/alvaromongon/verifactu-shopify/issues/5).
+- **Todo sale como F2** hasta que el checkout recoja el NIF.
+- **Algunos pedidos no se envían y se informan para revisarlos a mano**, y la ejecución termina con error:
+  - una línea sin IVA o con más de un tipo;
+  - un pedido editado después del checkout;
+  - un pedido por encima del límite de la F2.
+
+  No gastan número. Vuelven a salir en cada ejecución hasta que se resuelvan.
+- **Serie propia**, `{prefijo}-{aaaa}-{nnnnnn}`, compartida por F1 y F2. Se reinicia cada año. El último número usado se lee de la AEAT.
+- **Fecha de expedición**: el día en que se envía.
+
+### Sin duplicados y sin estado
+
+La descripción de cada registro empieza por el pedido: `Pedido #1001 (5812345678901): …`. Antes de enviar, el conector lee de la AEAT los registros de su sistema informático del mes actual y del anterior, y no vuelve a facturar ningún pedido que aparezca en ellos. Cuentan también los de facturas anuladas. No se usa `RefExterna` porque la librería lo sobrescribe ([mdiago/VeriFactu#294](https://github.com/mdiago/VeriFactu/issues/294)).
+
+- **Si un envío se queda sin respuesta**, la siguiente ejecución lo comprueba en la AEAT: si no llegó, lo envía otra vez con el mismo número.
+- **Si la AEAT rechaza un registro**, la ejecución se para y termina con error.
+- **Un conector parado más de un mes pierde pedidos.** Los cobrados antes del mes anterior ya no se pueden comprobar, así que no se facturan solos.
 
 ## Despliegue
 
@@ -111,6 +164,7 @@ En un despliegue el certificado no sale del almacén del sistema: llega como **f
 | `VeriFactu__CertificatePath` | Ruta al `.pfx` montado |
 | `VeriFactu__CertificatePasswordPath` | Ruta al fichero con su contraseña |
 | `VeriFactu__CertificatePassword` | Alternativa a la anterior, pero el entorno de un proceso se filtra con más facilidad que un fichero |
+| `Shopify__ClientSecretPath` | Ruta al fichero con el secreto de la app de Shopify (o `Shopify__ClientSecret`, con la misma salvedad) |
 
 Cualquier plataforma sabe entregar un fichero a un proceso: un Secret montado en Kubernetes, `secrets` en Docker, `LoadCredential=` en systemd, el agente de Vault o el CSI driver de cualquier nube. Así no hace falta el SDK de ningún proveedor.
 

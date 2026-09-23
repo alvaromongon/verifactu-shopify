@@ -1,0 +1,24 @@
+# Plantilla de la app de Shopify que usa el conector. La real se crea en el Dev Dashboard
+# (https://dev.shopify.com), en la misma organización que la tienda, y se instala en ella.
+# Copia este fichero a shopify.app.toml (excluido del repositorio) si gestionas la app con
+# Shopify CLI: `shopify app config link` y `shopify app deploy`.
+#
+# El conector no tiene interfaz ni recibe llamadas: solo lee pedidos con un token que obtiene
+# en cada ejecución por client credentials. El secreto no va aquí, sino en la configuración
+# del conector (ver README).
+
+client_id = "<CLIENT_ID_DEL_DEV_DASHBOARD>"
+name = "verifactu-shopify"
+application_url = "https://github.com/alvaromongon/verifactu-shopify"
+embedded = false
+
+[access_scopes]
+# Solo lectura de pedidos. Ningún dato protegido de cliente: todo sale como F2 (ver #3 y #4).
+scopes = "read_orders"
+
+[auth]
+redirect_urls = []
+
+[webhooks]
+# La misma versión que ShopifyClient.ApiVersion.
+api_version = "2026-07"

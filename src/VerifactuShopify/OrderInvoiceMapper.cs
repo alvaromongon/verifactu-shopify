@@ -92,15 +92,16 @@ public static class OrderInvoiceMapper
         return (taxLine.RatePercentage, baseAmount, taxLine.Amount);
     }
 
-    // Falls back to a generic description for a shipping-only order (empty Lines is otherwise
-    // valid: BuildTaxItems only rejects an order with no lines *and* no shipping), and truncates
-    // because DescripcionOperacion is mandatory and length-limited - both would otherwise be
-    // caught only when the AEAT rejects the registro, after the invoice number is already spent.
+    // Starts with the order reference, which is how a later run tells this order was already
+    // invoiced (OrderReference), so truncation must never cut into it. Truncating at all is
+    // needed because DescripcionOperacion is mandatory and length-limited: an overlong one would
+    // only be caught when the AEAT rejects the registro, after the invoice number is spent.
     static string DescribeLines(ShopifyOrder order)
     {
+        var reference = OrderReference.Describe(order);
         var description = order.Lines.Count > 0
-            ? string.Join(", ", order.Lines.Select(line => line.Title))
-            : $"Pedido {order.Id}";
+            ? $"{reference}: {string.Join(", ", order.Lines.Select(line => line.Title))}"
+            : reference;
 
         return description.Length > MaxDescriptionLength ? description[..MaxDescriptionLength] : description;
     }

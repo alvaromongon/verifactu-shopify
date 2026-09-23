@@ -8,8 +8,8 @@ using VeriFactu.Xml.Factu.Alta;
 using VerifactuShopify;
 
 // M1: herramienta para probar la librería contra preproducción de la AEAT.
-const string SellerNifKey = "VeriFactu:Emisor:NIF";
-const string SellerNameKey = "VeriFactu:Emisor:Nombre";
+const string SellerNifKey = VerifactuShopify.ConfigurationExtensions.SellerNifKey;
+const string SellerNameKey = VerifactuShopify.ConfigurationExtensions.SellerNameKey;
 const string DateFormat = "dd-MM-yyyy";
 
 // Antes de tocar nada de VeriFactu: la cultura decide cómo se lee la cadena de bloques.
@@ -29,10 +29,11 @@ try
             Cancel(invoiceId, DateTime.ParseExact(invoiceDate, DateFormat, CultureInfo.InvariantCulture)),
         ["consultar", var year, var month] => Query(year, month),
         ["cadena"] => ShowChain(),
+        ["sincronizar"] => await Sync(),
         _ => PrintUsage(),
     };
 }
-catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or FormatException)
+catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or FormatException or HttpRequestException)
 {
     // WebException también es InvalidOperationException: sin la interna no se ve por qué falló el TLS.
     for (var e = ex; e is not null; e = e.InnerException)
@@ -49,6 +50,7 @@ int PrintUsage()
           anular <numserie> <dd-mm-aaaa>  anula un registro enviado a preproducción
           consultar <aaaa> <mm>          lista lo que la AEAT tiene del emisor en ese periodo, sin enviar nada
           cadena                         muestra el último registro de la cadena según la AEAT y el local, sin enviar nada
+          sincronizar                    envía a preproducción los pedidos pagados de Shopify que aún no tengan registro
         """);
     return 1;
 }
@@ -142,6 +144,13 @@ int ShowChain()
         ? "Local:       sin cadena"
         : $"Local:       {local.IDFactura.NumSerieFactura} {local.IDFactura.FechaExpedicionFactura} {local.Huella}");
     return head?.Huella == local?.Huella ? 0 : 1;
+}
+
+async Task<int> Sync()
+{
+    PrepareSend();
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    return await OrderSync.RunAsync(configuration, Settings.Current.SistemaInformatico, http, DateTimeOffset.Now);
 }
 
 void PrepareSend()
