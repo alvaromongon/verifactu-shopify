@@ -181,6 +181,7 @@ Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de es
 - **Sin cadena local** (un contenedor recién creado), se carga la de la AEAT. La carpeta de cadenas tiene que estar vacía.
 - **Con cadena local** (desarrollo), solo se comprueba que coincide con la de la AEAT. Si no coincide, no se envía nada. Pasa, por ejemplo, después de enviar desde otra máquina. Si la AEAT tiene razón, basta con mover la carpeta `Blockchains` de los datos locales.
 - **El mismo NIF puede facturar desde otros sistemas**, como el TPV de Shopify, y cada uno tiene su propia cadena. El conector solo mira los registros de su sistema: el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`. Por eso el número de instalación tiene que ser fijo y no repetirse nunca.
+- **Si el último registro tiene más de un mes, hoy no se encuentra**: el siguiente saldría como primer registro y la cadena quedaría rota. Pasa si la tienda pasa más de un mes sin ventas o el conector está parado. Pendiente en [#22](https://github.com/alvaromongon/verifactu-shopify/issues/22).
 - **Solo se anulan facturas del mes actual o del anterior**, que son los dos meses que se consultan. Lo más antiguo se corrige con una rectificativa.
 - **Dos ejecuciones a la vez para el mismo emisor romperían la cadena.** Hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)), no puede haber más de una a la vez.
 
