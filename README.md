@@ -170,7 +170,7 @@ Separar el 2 del 1 sirve para que la alerta del planificador salte solo cuando a
 
 ## Despliegue
 
-En un despliegue el certificado no sale del almacén del sistema: llega como **fichero de secreto**, se carga en memoria y se le entrega a la librería sin instalarlo ni copiarlo a ninguna parte. La configuración va por variables de entorno, que tienen prioridad sobre `dotnet user-secrets`:
+En un despliegue el certificado no sale del almacén del sistema: llega como **fichero de secreto**, se carga en memoria y se le entrega a la librería sin instalarlo ni copiarlo a ninguna parte. La configuración va por variables de entorno, que tienen prioridad sobre `dotnet user-secrets`. Estas son las de los secretos; la lista completa está en [Despliegue como tarea periódica](#despliegue-como-tarea-periódica):
 
 | Variable | Valor |
 |---|---|
@@ -186,6 +186,98 @@ Cualquier plataforma sabe entregar un fichero a un proceso: un Secret montado en
 El proceso avisa por la salida de error cuando al certificado le quedan 30 días o menos, y falla si ya ha caducado. La AEAT no avisa.
 
 **Huso horario:** los registros se fechan con la hora local del proceso, que tiene que ser la del territorio desde el que se expiden las facturas (art. 7.e de la Orden HAC/1177/2024). Un contenedor usa UTC si no se indica otra cosa: hay que arrancarlo con `TZ=Europe/Madrid` (o `Atlantic/Canary`) y con los datos de zonas horarias, que las imágenes `mcr.microsoft.com/dotnet/runtime` ya traen. Los comandos de envío muestran el huso que están usando.
+
+## Despliegue como tarea periódica
+
+`sincronizar` hace una sola pasada y termina. Se despliega como una tarea periódica: un `CronJob` de Kubernetes, un temporizador de systemd, cron o el planificador de cualquier nube. Todavía no hay imagen publicada ([#23](https://github.com/alvaromongon/verifactu-shopify/issues/23)).
+
+### Variables de entorno
+
+Cada clave de configuración pasa a variable de entorno cambiando `:` por `__`: `Facturacion:Prefijo` es `Facturacion__Prefijo`. Los secretos llegan como fichero, con la variable terminada en `Path`.
+
+| Variable | | Valor |
+|---|---|---|
+| `VeriFactu__CertificatePath` | Secreto, fichero | `.pfx` del certificado ([Certificado](#certificado)) |
+| `VeriFactu__CertificatePasswordPath` | Secreto, fichero | Contraseña del `.pfx` |
+| `VeriFactu__Emisor__NIF` / `VeriFactu__Emisor__Nombre` | Obligatoria | Obligado a expedir las facturas |
+| `VeriFactu__SistemaInformatico__NIF` / `…__NombreRazon` | Obligatoria | Productor del SIF |
+| `VeriFactu__SistemaInformatico__NumeroInstalacion` | Obligatoria | Fijo para siempre y distinto en cada instalación ([Cadena de registros](#cadena-de-registros)) |
+| `Shopify__Tienda` | Obligatoria | Dominio `*.myshopify.com` |
+| `Shopify__ClientId` | Obligatoria | Client ID de la app |
+| `Shopify__ClientSecretPath` | Secreto, fichero | Secreto de la app |
+| `Sincronizacion__Desde` | Obligatoria | Fecha de corte, con su desfase: `2026-09-23T00:00:00+02:00` |
+| `Sincronizacion__MargenMinutos` | Opcional | Por defecto, 10 |
+| `Facturacion__Prefijo` | Obligatoria | Prefijo de la serie |
+| `Facturacion__Semilla` | Opcional | Solo si se continúa una serie existente |
+| `Facturacion__LimiteSimplificada` | Opcional | Por defecto, 400 |
+| `TZ` | Obligatoria | `Europe/Madrid` o `Atlantic/Canary` ([Despliegue](#despliegue)) |
+
+Lo que significa cada clave está en [Configuración](#configuración).
+
+### Requisitos
+
+- **Intervalo**: 5 minutos. Es el retraso entre el cobro y la factura, y el margen se suma a él. Entre los dos no deben pasar de 60 minutos ([#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
+- **Una sola ejecución a la vez** por emisor, hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)): en Kubernetes, `concurrencyPolicy: Forbid`; con cron, `flock`.
+- **Carpeta de datos de VeriFactu vacía y con permiso de escritura** en cada ejecución (en Linux, `/usr/share/VeriFactu`). No hace falta conservarla: un volumen temporal basta ([Datos locales de VeriFactu](#datos-locales-de-verifactu)).
+- **Códigos de salida**: 1 es un error; 2 son pedidos para revisar a mano ([Códigos de salida](#códigos-de-salida)). Casi ningún planificador distingue el 2 del 1. Si no quieres que el 2 cuente como fallo:
+  - con systemd, `SuccessExitStatus=2`;
+  - en Kubernetes o cron, envuelve el comando, como en el ejemplo.
+
+  El aviso de los pedidos pendientes sigue en la salida.
+
+### Ejemplo: `CronJob` de Kubernetes
+
+Es una plantilla, no un manifiesto probado. La imagen es la que salga de #23.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: verifactu-shopify
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid        # Nunca dos ejecuciones a la vez (#16)
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0              # Sin reintento inmediato: la siguiente ejecución retoma desde la AEAT
+      activeDeadlineSeconds: 240   # Menos que el intervalo
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            fsGroup: 1654
+          containers:
+            - name: sincronizar
+              image: <imagen del conector>
+              # El 2 (pedidos para revisar) no marca el Job como fallido; el aviso queda en el log.
+              command: ["sh", "-c", "dotnet VerifactuShopify.dll sincronizar; c=$?; [ $c -eq 2 ] && exit 0; exit $c"]
+              envFrom:
+                - configMapRef:
+                    name: verifactu-shopify     # Todas las variables que no son secretos
+              env:
+                - name: VeriFactu__CertificatePath
+                  value: /run/secrets/verifactu/certificado.pfx
+                - name: VeriFactu__CertificatePasswordPath
+                  value: /run/secrets/verifactu/certificado.pass
+                - name: Shopify__ClientSecretPath
+                  value: /run/secrets/verifactu/shopify-client-secret
+              volumeMounts:
+                - name: secretos
+                  mountPath: /run/secrets/verifactu
+                  readOnly: true
+                - name: datos
+                  mountPath: /usr/share/VeriFactu   # Vacía en cada ejecución: sin estado (#12)
+          volumes:
+            - name: secretos
+              secret:
+                secretName: verifactu-shopify
+                defaultMode: 0440          # Legibles por el grupo de fsGroup, no por otros
+            - name: datos
+              emptyDir: {}
+```
 
 ## Cadena de registros
 
