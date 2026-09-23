@@ -69,6 +69,14 @@ public sealed record SyncSettings(
 // registro for each order still missing one. Nothing is kept between runs (#4, #12).
 public static class OrderSync
 {
+    // Exit codes, so a scheduler can alert on real failures only. Orders waiting for manual review
+    // come up again on every run until someone deals with them: reporting them as a failure would
+    // leave the job red for days. Any other error (AEAT rejection, Shopify or AEAT unreachable,
+    // bad configuration) exits with 1.
+    public const int Success = 0;
+    public const int Failure = 1;
+    public const int NeedsReview = 2;
+
     public static async Task<int> RunAsync(IConfiguration configuration, SistemaInformatico sistema, HttpClient http, DateTimeOffset now)
     {
         var settings = SyncSettings.From(configuration);
@@ -103,7 +111,7 @@ public static class OrderSync
             .ToList();
         Console.WriteLine($"Shopify:     {statuses.Count} pagados desde {since:yyyy-MM-dd HH:mm}, {pending.Count} por facturar");
         if (pending.Count == 0)
-            return 0;
+            return Success;
 
         var year = now.Year;
         var next = settings.Series.Next(SeriesNumbersThisYear(records, settings.Series, year, sellerNif, sellerName, sistema, now),
@@ -145,14 +153,14 @@ public static class OrderSync
             {
                 // A rejection would repeat for every run with this data: stop and let someone look.
                 Console.WriteLine($"{label}: {invoice.InvoiceID} rechazada. {entry.ErrorCode}: {entry.ErrorDescription}");
-                return 1;
+                return Failure;
             }
 
             Console.WriteLine($"{label}: {invoice.InvoiceID} {entry.Status} CSV {entry.CSV}");
             next++;
         }
 
-        return needsReview ? 1 : 0;
+        return needsReview ? NeedsReview : Success;
     }
 
     // Every registro counts, whatever its state: an anulled invoice doesn't bring its order back,

@@ -138,7 +138,7 @@ dotnet run --project src/VerifactuShopify -- sincronizar
   - y ha pasado el margen.
 - **Un reembolso anterior a la factura la deja fuera.** Esos pedidos llegarán con [#5](https://github.com/alvaromongon/verifactu-shopify/issues/5).
 - **Todo sale como F2** hasta que el checkout recoja el NIF.
-- **Algunos pedidos no se envían y se informan para revisarlos a mano**, y la ejecución termina con error:
+- **Algunos pedidos no se envían y se informan para revisarlos a mano**, y la ejecución termina con código 2:
   - una línea sin IVA o con más de un tipo;
   - un pedido editado después del checkout;
   - un pedido por encima del límite de la F2.
@@ -156,6 +156,16 @@ La descripción de cada registro empieza por el pedido: `Pedido #1001 (581234567
 
 - **Si un envío se queda sin respuesta**, la siguiente ejecución lo comprueba en la AEAT: si no llegó, lo envía otra vez con el mismo número.
 - **Si la AEAT rechaza un registro**, la ejecución se para y termina con error.
+
+### Códigos de salida
+
+| Código | Significado |
+|---|---|
+| 0 | Todo enviado, o nada que enviar |
+| 1 | Error: la AEAT rechazó un registro, Shopify o la AEAT no respondieron, o la configuración no es válida. Hay que mirarlo |
+| 2 | Todo lo que se podía enviar se envió, pero quedan pedidos para revisar a mano |
+
+Separar el 2 del 1 sirve para que la alerta del planificador salte solo cuando algo se rompe. Un pedido pendiente de revisión vuelve a salir en cada ejecución hasta que se resuelve.
 - **Un conector parado más de un mes pierde pedidos.** Los cobrados antes del mes anterior ya no se pueden comprobar, así que no se facturan solos.
 
 ## Despliegue

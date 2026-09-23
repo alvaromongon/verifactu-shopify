@@ -51,6 +51,7 @@ int PrintUsage()
           consultar <aaaa> <mm>          lista lo que la AEAT tiene del emisor en ese periodo, sin enviar nada
           cadena                         muestra el último registro de la cadena según la AEAT y el local, sin enviar nada
           sincronizar                    envía a preproducción los pedidos pagados de Shopify que aún no tengan registro
+                                         (sale con 2 si quedan pedidos para revisar a mano)
         """);
     return 1;
 }
