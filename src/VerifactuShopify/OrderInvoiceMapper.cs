@@ -21,6 +21,9 @@ public sealed class OrderNotInvoiceableException(string message) : Exception(mes
 // the design discussion on issue #3.
 public static class OrderInvoiceMapper
 {
+    // AEAT rejects a DescripcionOperacion longer than this.
+    const int MaxDescriptionLength = 500;
+
     public static Invoice Map(ShopifyOrder order, string invoiceId, InvoiceMappingSettings settings)
     {
         var taxItems = BuildTaxItems(order);
@@ -29,17 +32,18 @@ public static class OrderInvoiceMapper
         var invoice = new Invoice(invoiceId, order.InvoiceDate, settings.SellerNif)
         {
             SellerName = settings.SellerName,
-            Text = DescribeLines(order.Lines),
+            Text = DescribeLines(order),
             TaxItems = taxItems,
         };
 
-        if (order.BuyerNif is not null)
+        if (!string.IsNullOrWhiteSpace(order.BuyerNif))
         {
             invoice.InvoiceType = TipoFactura.F1;
             invoice.BuyerID = order.BuyerNif;
             invoice.BuyerIDType = IDType.NIF_IVA;
-            invoice.BuyerName = order.BuyerName
-                ?? throw new OrderNotInvoiceableException($"Order {order.Id} has a buyer NIF but no buyer name.");
+            invoice.BuyerName = !string.IsNullOrWhiteSpace(order.BuyerName)
+                ? order.BuyerName
+                : throw new OrderNotInvoiceableException($"Order {order.Id} has a buyer NIF but no buyer name.");
         }
         else if (total <= settings.SimplifiedInvoiceLimit)
         {
@@ -88,6 +92,16 @@ public static class OrderInvoiceMapper
         return (taxLine.RatePercentage, baseAmount, taxLine.Amount);
     }
 
-    static string DescribeLines(IReadOnlyList<ShopifyOrderLine> lines) =>
-        string.Join(", ", lines.Select(line => line.Title));
+    // Falls back to a generic description for a shipping-only order (empty Lines is otherwise
+    // valid: BuildTaxItems only rejects an order with no lines *and* no shipping), and truncates
+    // because DescripcionOperacion is mandatory and length-limited - both would otherwise be
+    // caught only when the AEAT rejects the registro, after the invoice number is already spent.
+    static string DescribeLines(ShopifyOrder order)
+    {
+        var description = order.Lines.Count > 0
+            ? string.Join(", ", order.Lines.Select(line => line.Title))
+            : $"Pedido {order.Id}";
+
+        return description.Length > MaxDescriptionLength ? description[..MaxDescriptionLength] : description;
+    }
 }

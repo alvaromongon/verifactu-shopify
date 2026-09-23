@@ -123,4 +123,49 @@ public class OrderInvoiceMapperTests
 
         Assert.Throws<OrderNotInvoiceableException>(() => OrderInvoiceMapper.Map(order, "S2026-0001", Settings));
     }
+
+    [Fact]
+    public void Shipping_only_order_gets_a_non_empty_description()
+    {
+        var order = Order([], shipping: Line("Envío", 1, 12.10m, 0m, new ShopifyTaxLine(21, 2.10m)));
+
+        var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
+
+        Assert.False(string.IsNullOrWhiteSpace(invoice.Text));
+    }
+
+    [Fact]
+    public void Description_is_truncated_to_the_AEAT_length_limit()
+    {
+        var lines = Enumerable.Range(1, 15)
+            .Select(i => Line(new string('x', 40) + i, 1, 11m, 0m, new ShopifyTaxLine(10, 1m)))
+            .ToArray();
+        var order = Order(lines, buyerNif: "12345678Z", buyerName: "Empresa de Prueba SL");
+
+        var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
+
+        Assert.True(invoice.Text.Length <= 500);
+    }
+
+    [Fact]
+    public void Blank_buyer_nif_is_treated_as_no_nif()
+    {
+        var order = Order(
+            [Line("Jamón de bellota", 1, 110m, 0m, new ShopifyTaxLine(10, 10m))],
+            buyerNif: "   ");
+
+        var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
+
+        Assert.Equal(TipoFactura.F2, invoice.InvoiceType);
+    }
+
+    [Fact]
+    public void Blank_buyer_nif_above_the_simplified_limit_is_still_rejected()
+    {
+        var order = Order(
+            [Line("Jamón de bellota 9kg", 1, 550m, 0m, new ShopifyTaxLine(10, 50m))],
+            buyerNif: "");
+
+        Assert.Throws<OrderNotInvoiceableException>(() => OrderInvoiceMapper.Map(order, "S2026-0001", Settings));
+    }
 }
