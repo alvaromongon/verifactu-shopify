@@ -1,5 +1,13 @@
 # verifactu-shopify
 
+> **In English.** Open-source connector between Shopify and VERI\*FACTU, the Spanish Tax Agency (AEAT) system for registering invoices. It turns Shopify orders into invoice records (simplified, full and corrective) and submits them to the AEAT through the [mdiago/VeriFactu](https://github.com/mdiago/VeriFactu) library.
+>
+> - **Stateless by design.** Records are hash-chained and the AEAT is the source of truth for the chain, so a fresh container picks up where the last one left off.
+> - **Certificate handling without a cloud SDK.** The client certificate is loaded in memory from a mounted secret file; on Linux the private key never touches disk.
+> - **.NET 10**, with CI on Linux, macOS and Windows.
+>
+> **Status: in development, tested only against the AEAT pre-production environment.** The rest of this README, the issues and the milestones are in Spanish, because the users are Spanish businesses.
+
 Conector entre Shopify y VERI\*FACTU, el sistema de la Agencia Tributaria (AEAT) para registrar facturas. Convierte los pedidos de una tienda Shopify en registros de facturación —simplificadas, completas y rectificativas— y los envía a la AEAT con la librería [mdiago/VeriFactu](https://github.com/mdiago/VeriFactu).
 
 > **Estado: en desarrollo. No lo uses para facturar.** Por ahora solo se prueba contra el entorno de preproducción de la AEAT, que no tiene efectos fiscales. El avance está en los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
