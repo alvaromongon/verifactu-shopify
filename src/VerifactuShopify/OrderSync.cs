@@ -139,6 +139,7 @@ public static class OrderSync
             var entry = new InvoiceEntry(invoice);
             try
             {
+                // Contabiliza y envía a la AEAT el registro.
                 entry.Save();
             }
             catch

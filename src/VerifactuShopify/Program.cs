@@ -17,7 +17,9 @@ CultureSetup.Configure();
 
 // Las variables de entorno van después para que el despliegue pueda inyectar el certificado
 // sobre lo que haya en user-secrets (VeriFactu__CertificatePath, VeriFactu__CertificatePasswordPath).
-var configuration = new ConfigurationBuilder().AddUserSecrets<Program>().AddEnvironmentVariables().Build();
+var configuration = new ConfigurationBuilder()
+    .AddUserSecrets<Program>()
+    .AddEnvironmentVariables().Build();
 
 try
 {
@@ -33,7 +35,10 @@ try
         _ => PrintUsage(),
     };
 }
-catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or FormatException or HttpRequestException)
+catch (Exception ex) when (ex is InvalidOperationException
+                            or FileNotFoundException 
+                            or FormatException 
+                            or HttpRequestException)
 {
     // WebException también es InvalidOperationException: sin la interna no se ve por qué falló el TLS.
     for (var e = ex; e is not null; e = e.InnerException)
