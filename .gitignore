@@ -13,3 +13,8 @@ obj/
 *.pem
 *.key
 .env
+
+# Configuración real de la app de Shopify: la plantilla es shopify.app.example.toml
+shopify.app.toml
+shopify.app.*.toml
+!shopify.app.example.toml

@@ -104,21 +104,88 @@ dotnet run --project src/VerifactuShopify -- consultar <aaaa> <mm>
 dotnet run --project src/VerifactuShopify -- cadena
 ```
 
+```bash
+dotnet run --project src/VerifactuShopify -- sincronizar
+```
+
 `certificado` no envía nada, y `consultar` y `cadena` solo leen de la AEAT. La primera vez que un comando habla con la AEAT, macOS pide permiso para usar la clave del llavero. Si no se concede a tiempo, la conexión falla con un timeout.
 
 - **`consultar`** lista lo que la AEAT tiene del emisor en un mes: por cada factura, su último registro con su huella y su encadenamiento.
 - **`cadena`** muestra el último registro de la cadena según la AEAT y el local, y termina con error si no coinciden.
 - **`enviar-f2` y `anular`** leen primero la cadena de la AEAT (ver [Cadena de registros](#cadena-de-registros)).
+- **`sincronizar`** envía los pedidos pagados de Shopify que aún no tengan registro (ver [Sincronización con Shopify](#sincronización-con-shopify)).
+
+## Sincronización con Shopify
+
+`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
+
+### App de Shopify
+
+- **Se crea en el [Dev Dashboard](https://dev.shopify.com)**, en la misma organización que la tienda, y se instala en ella.
+- **Solo pide `read_orders`** y ningún dato protegido de cliente. El permiso tiene que estar en una versión **publicada** de la app y aprobado en la tienda: si no, el token llega sin permisos y el conector lo indica. [`shopify.app.example.toml`](shopify.app.example.toml) es la plantilla. El `shopify.app.toml` real no se sube al repositorio.
+- **El token se pide en cada ejecución** con el client ID y el secreto ([client credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant)). No se guarda en ningún sitio. Esta vía solo funciona si la app y la tienda están en la misma organización.
+
+### Configuración
+
+| Clave | Valor |
+|---|---|
+| `Shopify:Tienda` | Dominio `*.myshopify.com` de la tienda, no el público. Está en el admin, en Configuración > Dominios |
+| `Shopify:ClientId` / `Shopify:ClientSecret` | Credenciales de la app en el Dev Dashboard |
+| `Sincronizacion:Desde` | Fecha y hora de corte, p. ej. `2026-09-23T00:00:00+02:00`. Los pedidos cobrados antes no se facturan |
+| `Sincronizacion:MargenMinutos` | Espera desde el cobro antes de facturar. Por defecto, 10 |
+| `Facturacion:Prefijo` | Prefijo de la serie, solo letras y dígitos, p. ej. `PRE` |
+| `Facturacion:Semilla` | Opcional, `aaaa:n`: último número usado ese año fuera del conector. Solo si se continúa una serie existente (ver abajo) |
+| `Facturacion:LimiteSimplificada` | Importe máximo de una F2. Por defecto, 400 |
+
+### Qué se factura
+
+- **Un pedido se factura cuando**:
+  - está pagado;
+  - no está cancelado ni es de prueba;
+  - se cobró después de la fecha de corte;
+  - y ha pasado el margen.
+- **Un reembolso anterior a la factura la deja fuera.** Esos pedidos llegarán con [#5](https://github.com/alvaromongon/verifactu-shopify/issues/5).
+- **Todo sale como F2** hasta que el checkout recoja el NIF.
+- **Algunos pedidos no se envían y se informan para revisarlos a mano**, y la ejecución termina con código 2:
+  - una línea sin IVA o con más de un tipo;
+  - un pedido editado después del checkout;
+  - un pedido por encima del límite de la F2.
+
+  No gastan número. Vuelven a salir en cada ejecución hasta que se resuelvan.
+- **Serie propia**, `{prefijo}-{aaaa}-{nnnnnn}`, compartida por F1 y F2. Se reinicia cada año. El último número usado se lee de la AEAT.
+  - **Con una serie nueva no hace falta semilla**: empieza en 1. Es el caso de preproducción, con su propio prefijo.
+  - **Al pasar a producción hay que decidir** si se continúa la serie con la que la tienda ya facturaba o se abre una nueva. El Reglamento de facturación (RD 1619/2012, art. 6.1.a) exige numeración correlativa dentro de cada serie y admite series separadas «cuando existan razones que lo justifiquen». Consúltalo con tu asesor ([#4](https://github.com/alvaromongon/verifactu-shopify/issues/4#issuecomment-5796211394)).
+  - **Para continuar una serie existente**, `Facturacion:Semilla` indica el último número usado. El formato del número tiene que ser el mismo, y desde el corte toda venta tiene que entrar como pedido de Shopify, porque las ventas que no pasan por el conector gastarían números de la misma serie.
+- **Fecha de expedición**: el día en que se envía.
+
+### Sin duplicados y sin estado
+
+La descripción de cada registro empieza por el pedido: `Pedido #1001 (5812345678901): …`. Antes de enviar, el conector lee de la AEAT los registros de su sistema informático del mes actual y del anterior, y no vuelve a facturar ningún pedido que aparezca en ellos. Cuentan también los de facturas anuladas. No se usa `RefExterna` porque la librería lo sobrescribe ([mdiago/VeriFactu#294](https://github.com/mdiago/VeriFactu/issues/294)).
+
+- **Si un envío se queda sin respuesta**, la siguiente ejecución lo comprueba en la AEAT: si no llegó, lo envía otra vez con el mismo número.
+- **Si la AEAT rechaza un registro**, la ejecución se para y termina con error.
+
+### Códigos de salida
+
+| Código | Significado |
+|---|---|
+| 0 | Todo enviado, o nada que enviar |
+| 1 | Error: la AEAT rechazó un registro, Shopify o la AEAT no respondieron, o la configuración no es válida. Hay que mirarlo |
+| 2 | Todo lo que se podía enviar se envió, pero quedan pedidos para revisar a mano |
+
+Separar el 2 del 1 sirve para que la alerta del planificador salte solo cuando algo se rompe. Un pedido pendiente de revisión vuelve a salir en cada ejecución hasta que se resuelve.
+- **Un conector parado más de un mes pierde pedidos.** Los cobrados antes del mes anterior ya no se pueden comprobar, así que no se facturan solos.
 
 ## Despliegue
 
-En un despliegue el certificado no sale del almacén del sistema: llega como **fichero de secreto**, se carga en memoria y se le entrega a la librería sin instalarlo ni copiarlo a ninguna parte. La configuración va por variables de entorno, que tienen prioridad sobre `dotnet user-secrets`:
+En un despliegue el certificado no sale del almacén del sistema: llega como **fichero de secreto**, se carga en memoria y se le entrega a la librería sin instalarlo ni copiarlo a ninguna parte. La configuración va por variables de entorno, que tienen prioridad sobre `dotnet user-secrets`. Estas son las de los secretos; la lista completa está en [Despliegue como tarea periódica](#despliegue-como-tarea-periódica):
 
 | Variable | Valor |
 |---|---|
 | `VeriFactu__CertificatePath` | Ruta al `.pfx` montado |
 | `VeriFactu__CertificatePasswordPath` | Ruta al fichero con su contraseña |
 | `VeriFactu__CertificatePassword` | Alternativa a la anterior, pero el entorno de un proceso se filtra con más facilidad que un fichero |
+| `Shopify__ClientSecretPath` | Ruta al fichero con el secreto de la app de Shopify (o `Shopify__ClientSecret`, con la misma salvedad) |
 
 Cualquier plataforma sabe entregar un fichero a un proceso: un Secret montado en Kubernetes, `secrets` en Docker, `LoadCredential=` en systemd, el agente de Vault o el CSI driver de cualquier nube. Así no hace falta el SDK de ningún proveedor.
 
@@ -128,6 +195,98 @@ El proceso avisa por la salida de error cuando al certificado le quedan 30 días
 
 **Huso horario:** los registros se fechan con la hora local del proceso, que tiene que ser la del territorio desde el que se expiden las facturas (art. 7.e de la Orden HAC/1177/2024). Un contenedor usa UTC si no se indica otra cosa: hay que arrancarlo con `TZ=Europe/Madrid` (o `Atlantic/Canary`) y con los datos de zonas horarias, que las imágenes `mcr.microsoft.com/dotnet/runtime` ya traen. Los comandos de envío muestran el huso que están usando.
 
+## Despliegue como tarea periódica
+
+`sincronizar` hace una sola pasada y termina. Se despliega como una tarea periódica: un `CronJob` de Kubernetes, un temporizador de systemd, cron o el planificador de cualquier nube. Todavía no hay imagen publicada ([#23](https://github.com/alvaromongon/verifactu-shopify/issues/23)).
+
+### Variables de entorno
+
+Cada clave de configuración pasa a variable de entorno cambiando `:` por `__`: `Facturacion:Prefijo` es `Facturacion__Prefijo`. Los secretos llegan como fichero, con la variable terminada en `Path`.
+
+| Variable | | Valor |
+|---|---|---|
+| `VeriFactu__CertificatePath` | Secreto, fichero | `.pfx` del certificado ([Certificado](#certificado)) |
+| `VeriFactu__CertificatePasswordPath` | Secreto, fichero | Contraseña del `.pfx` |
+| `VeriFactu__Emisor__NIF` / `VeriFactu__Emisor__Nombre` | Obligatoria | Obligado a expedir las facturas |
+| `VeriFactu__SistemaInformatico__NIF` / `…__NombreRazon` | Obligatoria | Productor del SIF |
+| `VeriFactu__SistemaInformatico__NumeroInstalacion` | Obligatoria | Fijo para siempre y distinto en cada instalación ([Cadena de registros](#cadena-de-registros)) |
+| `Shopify__Tienda` | Obligatoria | Dominio `*.myshopify.com` |
+| `Shopify__ClientId` | Obligatoria | Client ID de la app |
+| `Shopify__ClientSecretPath` | Secreto, fichero | Secreto de la app |
+| `Sincronizacion__Desde` | Obligatoria | Fecha de corte, con su desfase: `2026-09-23T00:00:00+02:00` |
+| `Sincronizacion__MargenMinutos` | Opcional | Por defecto, 10 |
+| `Facturacion__Prefijo` | Obligatoria | Prefijo de la serie |
+| `Facturacion__Semilla` | Opcional | Solo si se continúa una serie existente |
+| `Facturacion__LimiteSimplificada` | Opcional | Por defecto, 400 |
+| `TZ` | Obligatoria | `Europe/Madrid` o `Atlantic/Canary` ([Despliegue](#despliegue)) |
+
+Lo que significa cada clave está en [Configuración](#configuración).
+
+### Requisitos
+
+- **Intervalo**: 5 minutos. Es el retraso entre el cobro y la factura, y el margen se suma a él. Entre los dos no deben pasar de 60 minutos ([#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
+- **Una sola ejecución a la vez** por emisor, hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)): en Kubernetes, `concurrencyPolicy: Forbid`; con cron, `flock`.
+- **Carpeta de datos de VeriFactu vacía y con permiso de escritura** en cada ejecución (en Linux, `/usr/share/VeriFactu`). No hace falta conservarla: un volumen temporal basta ([Datos locales de VeriFactu](#datos-locales-de-verifactu)).
+- **Códigos de salida**: 1 es un error; 2 son pedidos para revisar a mano ([Códigos de salida](#códigos-de-salida)). Casi ningún planificador distingue el 2 del 1. Si no quieres que el 2 cuente como fallo:
+  - con systemd, `SuccessExitStatus=2`;
+  - en Kubernetes o cron, envuelve el comando, como en el ejemplo.
+
+  El aviso de los pedidos pendientes sigue en la salida.
+
+### Ejemplo: `CronJob` de Kubernetes
+
+Es una plantilla, no un manifiesto probado. La imagen es la que salga de #23.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: verifactu-shopify
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid        # Nunca dos ejecuciones a la vez (#16)
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0              # Sin reintento inmediato: la siguiente ejecución retoma desde la AEAT
+      activeDeadlineSeconds: 240   # Menos que el intervalo
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            fsGroup: 1654
+          containers:
+            - name: sincronizar
+              image: <imagen del conector>
+              # El 2 (pedidos para revisar) no marca el Job como fallido; el aviso queda en el log.
+              command: ["sh", "-c", "dotnet VerifactuShopify.dll sincronizar; c=$?; [ $c -eq 2 ] && exit 0; exit $c"]
+              envFrom:
+                - configMapRef:
+                    name: verifactu-shopify     # Todas las variables que no son secretos
+              env:
+                - name: VeriFactu__CertificatePath
+                  value: /run/secrets/verifactu/certificado.pfx
+                - name: VeriFactu__CertificatePasswordPath
+                  value: /run/secrets/verifactu/certificado.pass
+                - name: Shopify__ClientSecretPath
+                  value: /run/secrets/verifactu/shopify-client-secret
+              volumeMounts:
+                - name: secretos
+                  mountPath: /run/secrets/verifactu
+                  readOnly: true
+                - name: datos
+                  mountPath: /usr/share/VeriFactu   # Vacía en cada ejecución: sin estado (#12)
+          volumes:
+            - name: secretos
+              secret:
+                secretName: verifactu-shopify
+                defaultMode: 0440          # Legibles por el grupo de fsGroup, no por otros
+            - name: datos
+              emptyDir: {}
+```
+
 ## Cadena de registros
 
 Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de esa cadena: antes de enviar o anular, el conector consulta el último registro de su sistema informático en el mes actual y en el anterior, y continúa desde él. Así el despliegue no necesita guardar estado entre ejecuciones (decisión en [#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
@@ -135,6 +294,7 @@ Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de es
 - **Sin cadena local** (un contenedor recién creado), se carga la de la AEAT. La carpeta de cadenas tiene que estar vacía.
 - **Con cadena local** (desarrollo), solo se comprueba que coincide con la de la AEAT. Si no coincide, no se envía nada. Pasa, por ejemplo, después de enviar desde otra máquina. Si la AEAT tiene razón, basta con mover la carpeta `Blockchains` de los datos locales.
 - **El mismo NIF puede facturar desde otros sistemas**, como el TPV de Shopify, y cada uno tiene su propia cadena. El conector solo mira los registros de su sistema: el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`. Por eso el número de instalación tiene que ser fijo y no repetirse nunca.
+- **Si el último registro tiene más de un mes, hoy no se encuentra**: el siguiente saldría como primer registro y la cadena quedaría rota. Pasa si la tienda pasa más de un mes sin ventas o el conector está parado. Pendiente en [#22](https://github.com/alvaromongon/verifactu-shopify/issues/22).
 - **Solo se anulan facturas del mes actual o del anterior**, que son los dos meses que se consultan. Lo más antiguo se corrige con una rectificativa.
 - **Dos ejecuciones a la vez para el mismo emisor romperían la cadena.** Hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)), no puede haber más de una a la vez.
 

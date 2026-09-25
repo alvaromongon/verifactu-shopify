@@ -15,7 +15,7 @@ public class OrderInvoiceMapperTests
         new(title, quantity, originalUnitPrice, discountAllocated, taxLines);
 
     static ShopifyOrder Order(IReadOnlyList<ShopifyOrderLine> lines, ShopifyOrderLine? shipping = null, bool taxesIncluded = true, string? buyerNif = null, string? buyerName = null) =>
-        new("gid://shopify/Order/1", new DateTime(2026, 9, 15), taxesIncluded, buyerNif, buyerName, lines, shipping);
+        new("5812345678901", "#1001", new DateTime(2026, 9, 15), taxesIncluded, buyerNif, buyerName, lines, shipping);
 
     [Fact]
     public void Single_line_with_no_buyer_nif_maps_to_F2()
@@ -131,7 +131,7 @@ public class OrderInvoiceMapperTests
 
         var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
 
-        Assert.False(string.IsNullOrWhiteSpace(invoice.Text));
+        Assert.Equal("Pedido #1001 (5812345678901)", invoice.Text);
     }
 
     [Fact]
@@ -145,6 +145,20 @@ public class OrderInvoiceMapperTests
         var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
 
         Assert.True(invoice.Text.Length <= 500);
+        Assert.Equal("5812345678901", OrderReference.FindOrderId(invoice.Text));
+    }
+
+    [Fact]
+    public void Description_starts_with_the_order_reference_and_lists_the_lines()
+    {
+        var order = Order([
+            Line("Jamón de bellota", 1, 110m, 0m, new ShopifyTaxLine(10, 10m)),
+            Line("Lomo (pieza)", 1, 33m, 0m, new ShopifyTaxLine(10, 3m)),
+        ]);
+
+        var invoice = OrderInvoiceMapper.Map(order, "S2026-0001", Settings);
+
+        Assert.Equal("Pedido #1001 (5812345678901): Jamón de bellota, Lomo (pieza)", invoice.Text);
     }
 
     [Fact]
