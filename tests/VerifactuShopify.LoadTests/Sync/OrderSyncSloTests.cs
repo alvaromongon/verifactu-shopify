@@ -22,11 +22,11 @@ public sealed class OrderSyncSloTests : IDisposable
 
     [SloFact]
     public Task A_regular_run_with_a_few_orders() =>
-        MeasureAsync("Regular run", "00000011B", orders: 10, objective: TimeSpan.FromSeconds(15));
+        MeasureAsync("Regular run", "00000011B", orders: 10, objective: TimeSpan.FromSeconds(10));
 
     [SloFact]
     public Task A_run_with_a_backlog_after_a_stop() =>
-        MeasureAsync("Backlog", "00000012N", orders: 200, objective: TimeSpan.FromMinutes(3));
+        MeasureAsync("Backlog", "00000012N", orders: 200, objective: TimeSpan.FromMinutes(2));
 
     async Task MeasureAsync(string scenario, string sellerNif, int orders, TimeSpan objective)
     {

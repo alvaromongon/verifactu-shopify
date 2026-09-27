@@ -363,8 +363,8 @@ El conector no es un servicio que atienda peticiones, sino una tarea periódica,
 
 | Objetivo | Valor |
 |---|---|
-| Pasada normal, con 10 pedidos pendientes | < 15 s |
-| Pasada con acumulación, con 200 pedidos pendientes (vuelta tras una parada) | < 3 min |
+| Pasada normal, con 10 pedidos pendientes | < 10 s |
+| Pasada con acumulación, con 200 pedidos pendientes (vuelta tras una parada) | < 2 min |
 | Errores | 0: la pasada termina con código 0 |
 | Protección de Shopify | 1 token + 1 consulta de estados por cada 50 pedidos + 1 lectura por pedido pendiente |
 | Protección de la AEAT | como mucho 1 consulta por mes transcurrido del año + 1 envío por pedido pendiente |
@@ -381,7 +381,7 @@ El conector no es un servicio que atienda peticiones, sino una tarea periódica,
 - **Consultas a la AEAT**: normalmente son 2, el mes actual y el anterior. Si la serie aún no tiene ningún número ese año, el conector busca el último mes a mes hacia atrás, hasta enero.
 - **Envíos a la AEAT**: hoy se hace uno por pedido. Cambiará con el control de flujo de la AEAT ([#30](https://github.com/alvaromongon/verifactu-shopify/issues/30)), y con él este objetivo.
 
-**Calibración.** Primera medición, en un Mac con Apple Silicon: la pasada normal tardó 7,4 s y la de 200 pedidos 85,8 s, unos 0,4 s por pedido (las dos latencias de los servicios simulados más el trabajo de la librería). Los objetivos dejan margen para un runner más lento. Hay que confirmarlos con la primera ejecución en el entorno de referencia.
+**Calibración.** En el entorno de referencia, la pasada normal tarda 7,0 s y la de 200 pedidos 85,9 s: unos 0,4 s por pedido, sobre todo por las latencias simuladas (en un Mac con Apple Silicon, 7,4 s y 85,8 s). Los objetivos dejan un margen de 1,4× sobre esas mediciones.
 
 ## Puertas de calidad
 
