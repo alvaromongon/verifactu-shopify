@@ -19,6 +19,8 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  # Test projects run one at a time (--max-parallel-test-modules 1): unit and component tests
+  # share VeriFactu's chains folder.
 
 jobs:
   # Jobs are skipped (not the whole workflow) when only unrelated files change: a skipped job
@@ -83,7 +85,7 @@ jobs:
 
       - name: Test with coverage
         run: >
-          dotnet test --configuration Release --no-build
+          dotnet test --configuration Release --no-build --max-parallel-test-modules 1
           --coverage --coverage-output-format cobertura --results-directory artifacts/TestResults
           --report-xunit-trx
 
@@ -123,7 +125,7 @@ jobs:
           global-json-file: global.json
 
       - name: Test
-        run: dotnet test --configuration Release
+        run: dotnet test --configuration Release --max-parallel-test-modules 1
 
   test-macos:
     name: Tests (macOS)
@@ -139,7 +141,7 @@ jobs:
           global-json-file: global.json
 
       - name: Test
-        run: dotnet test --configuration Release
+        run: dotnet test --configuration Release --max-parallel-test-modules 1
 
   # The shape the deployment will have: a Linux container, the certificate delivered as a secret
   # file and the configuration as environment variables. The jobs above do not cover it.
@@ -174,4 +176,4 @@ jobs:
           dotnet run --project src/VerifactuShopify -- certificado
           test ! -d /usr/share/VeriFactu
 
-      - run: dotnet test
+      - run: dotnet test --max-parallel-test-modules 1

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Merges the Cobertura reports produced by `dotnet test --coverage` and fails
-# when line coverage is below the threshold.
+# when line coverage is below the threshold (default 80%).
 set -euo pipefail
 
-# Measured and published but not enforced yet: raised to the baseline's 80% once the component
-# tests land.
-threshold="${COVERAGE_THRESHOLD:-0}"
+threshold="${COVERAGE_THRESHOLD:-80}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 output="$root/artifacts/coverage"
 

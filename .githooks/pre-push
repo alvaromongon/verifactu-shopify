@@ -13,7 +13,8 @@ dotnet build --configuration Release
 
 echo "pre-push: running tests with coverage..."
 rm -rf artifacts/TestResults
-dotnet test --configuration Release --no-build \
+# One test project at a time: unit and component tests share VeriFactu's chains folder.
+dotnet test --configuration Release --no-build --max-parallel-test-modules 1 \
   --coverage --coverage-output-format cobertura --results-directory artifacts/TestResults
 
 echo "pre-push: checking coverage..."
