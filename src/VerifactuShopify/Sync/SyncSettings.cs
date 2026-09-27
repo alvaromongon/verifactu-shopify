@@ -35,7 +35,7 @@ public sealed record SyncSettings(
         ClientSecret: configuration.GetRequiredSecret(ClientSecretKey),
         Rule: new InvoicingRuleSettings(
             Cutoff: Parse(configuration, CutoffKey, value => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture)),
-            Margin: TimeSpan.FromMinutes(configuration[MarginKey] is { Length: > 0 } margin
+            Margin: TimeSpan.FromMinutes(configuration[MarginKey] is { Length: > 0 }
                 ? Parse(configuration, MarginKey, value => int.Parse(value, CultureInfo.InvariantCulture))
                 : DefaultMarginMinutes)),
         Series: Parse(configuration, PrefixKey, prefix => new InvoiceSeries(prefix)),
