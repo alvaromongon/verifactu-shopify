@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace VerifactuShopify.Tests;
@@ -7,11 +8,18 @@ namespace VerifactuShopify.Tests;
 // estar bloqueado, y tampoco se ejecutan.
 public sealed class CiOnlyFactAttribute : FactAttribute
 {
-    public CiOnlyFactAttribute()
+    public CiOnlyFactAttribute(
+        [CallerFilePath] string? sourceFilePath = null,
+        [CallerLineNumber] int sourceLineNumber = -1)
+        : base(sourceFilePath, sourceLineNumber)
     {
         if (Environment.GetEnvironmentVariable("CI") is not "true")
+        {
             Skip = "Solo en CI: instalaría un certificado en el almacén de esta máquina.";
+        }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
             Skip = "En macOS el almacén del usuario es el llavero del runner.";
+        }
     }
 }

@@ -1,12 +1,14 @@
 using System.Xml.Linq;
+
 using VeriFactu.Blockchain;
 using VeriFactu.Business;
 using VeriFactu.Config;
 using VeriFactu.Xml;
-using SistemaInformatico = VeriFactu.Xml.Factu.SistemaInformatico;
 using VeriFactu.Xml.Factu.Alta;
 using VeriFactu.Xml.Factu.Consulta.Respuesta;
+
 using IDFactura = VeriFactu.Xml.Factu.Respuesta.IDFactura;
+using SistemaInformatico = VeriFactu.Xml.Factu.SistemaInformatico;
 
 namespace VerifactuShopify.Tests;
 
@@ -17,18 +19,18 @@ public sealed class BlockchainSetupTests
 
     static RegistroRespuestaConsultaFactuSistemaFacturacion Registro(
         string numSerie, string huella, string generado, string? anterior = null, string estado = "Correcto") => new()
-    {
-        IDFactura = new IDFactura { IDEmisorFactura = SellerNif, NumSerieFactura = numSerie, FechaExpedicionFactura = "22-09-2026" },
-        DatosRegistroFacturacion = new DatosRegistroFacturacion
         {
-            Huella = huella,
-            FechaHoraHusoGenRegistro = generado,
-            Encadenamiento = anterior is null
+            IDFactura = new IDFactura { IDEmisorFactura = SellerNif, NumSerieFactura = numSerie, FechaExpedicionFactura = "22-09-2026" },
+            DatosRegistroFacturacion = new DatosRegistroFacturacion
+            {
+                Huella = huella,
+                FechaHoraHusoGenRegistro = generado,
+                Encadenamiento = anterior is null
                 ? new Encadenamiento { PrimerRegistro = "S" }
                 : new Encadenamiento { RegistroAnterior = new RegistroAnterior { Huella = anterior } },
-        },
-        EstadoRegistro = new EstadoRegistro { EstadoReg = estado },
-    };
+            },
+            EstadoRegistro = new EstadoRegistro { EstadoReg = estado },
+        };
 
     [Fact]
     public void Without_records_there_is_no_head()
@@ -76,7 +78,10 @@ public sealed class BlockchainSetupTests
 
     static readonly SistemaInformatico Sistema = new()
     {
-        NIF = "12345678Z", IdSistemaInformatico = "01", NumeroInstalacion = "tienda-1", Version = "1.0.0.0",
+        NIF = "12345678Z",
+        IdSistemaInformatico = "01",
+        NumeroInstalacion = "tienda-1",
+        Version = "1.0.0.0",
     };
 
     // Como lo manda la AEAT: el bloque en el espacio de nombres de la respuesta y sus campos en el de SuministroInformacion.

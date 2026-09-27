@@ -1,0 +1,21 @@
+# Paths that affect each pipeline job (used by dorny/paths-filter).
+# Anything not listed (README, docs/, CLAUDE.md, .claude/, rulesets, dependabot...) skips them.
+dotnet: &dotnet
+  - "src/**"
+  - "tests/**"
+  - "*.slnx"
+  - "global.json"
+  - "Directory.Build.props"
+  - "Directory.Packages.props"
+  - ".editorconfig"
+  - "dotnet-tools.json"
+  - "build/**"
+  - ".github/path-filters.yml"
+
+ci:
+  - *dotnet
+  - ".github/workflows/ci.yml"
+
+codeql:
+  - *dotnet
+  - ".github/workflows/codeql.yml"

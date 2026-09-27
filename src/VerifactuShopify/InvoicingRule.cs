@@ -41,18 +41,35 @@ public static class InvoicingRule
         ShopifyOrderStatus order, DateTimeOffset now, DateTimeOffset windowStart, InvoicingRuleSettings settings)
     {
         if (order.Test)
+        {
             return InvoicingDecision.Test;
+        }
+
         if (order.CancelledAt is not null)
+        {
             return InvoicingDecision.Cancelled;
+        }
         // Refunded, even partially, before being invoiced: that's for #5 to handle.
         if (order.FinancialStatus != PaidStatus || order.PaidAt is not { } paidAt)
+        {
             return InvoicingDecision.NotPaid;
+        }
+
         if (paidAt < settings.Cutoff)
+        {
             return InvoicingDecision.BeforeCutoff;
+        }
+
         if (paidAt < windowStart)
+        {
             return InvoicingDecision.BeforeWindow;
+        }
+
         if (now - paidAt < settings.Margin)
+        {
             return InvoicingDecision.WithinMargin;
+        }
+
         return InvoicingDecision.Invoice;
     }
 }

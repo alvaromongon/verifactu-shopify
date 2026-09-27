@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+
 using Microsoft.Extensions.Configuration;
+
 using VeriFactu.Config;
 using VeriFactu.Net;
 

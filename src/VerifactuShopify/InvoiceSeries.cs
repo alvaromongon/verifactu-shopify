@@ -14,7 +14,9 @@ public sealed partial class InvoiceSeries
     public InvoiceSeries(string prefix)
     {
         if (!PrefixPattern().IsMatch(prefix))
+        {
             throw new ArgumentException($"The invoice series prefix must be letters and digits only: '{prefix}'.", nameof(prefix));
+        }
 
         Prefix = prefix;
         _pattern = new Regex($@"^{prefix}-(?<year>\d{{4}})-(?<number>\d{{6,}})$", RegexOptions.CultureInvariant);

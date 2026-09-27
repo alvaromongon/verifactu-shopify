@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace VerifactuShopify.Tests;
 
 // Para tests que cargan una cadena desde la AEAT: la librería solo lo admite con la carpeta de cadenas
@@ -5,7 +7,10 @@ namespace VerifactuShopify.Tests;
 // reales se saltan, para no tocarlas. La ruta es la de VeriFactu.Config.Settings, sin iniciarlo.
 public sealed class EmptyBlockchainFolderFactAttribute : FactAttribute
 {
-    public EmptyBlockchainFolderFactAttribute()
+    public EmptyBlockchainFolderFactAttribute(
+        [CallerFilePath] string? sourceFilePath = null,
+        [CallerLineNumber] int sourceLineNumber = -1)
+        : base(sourceFilePath, sourceLineNumber)
     {
         var root = Environment.GetFolderPath(OperatingSystem.IsMacOS()
             ? Environment.SpecialFolder.ApplicationData
@@ -13,6 +18,8 @@ public sealed class EmptyBlockchainFolderFactAttribute : FactAttribute
         var blockchains = Path.Combine(root, "VeriFactu", "Blockchains");
 
         if (Directory.Exists(blockchains) && Directory.EnumerateDirectories(blockchains).Any())
+        {
             Skip = $"{blockchains} ya tiene cadenas: la librería no puede cargar otra desde la AEAT.";
+        }
     }
 }

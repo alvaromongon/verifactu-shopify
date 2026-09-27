@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+
 using Microsoft.Extensions.Configuration;
+
 using VeriFactu.Config;
 using VeriFactu.Net;
 
@@ -29,22 +31,31 @@ public static class CertificateSetup
         var hasThumbprint = !string.IsNullOrWhiteSpace(thumbprint);
 
         if (hasPath && hasThumbprint)
+        {
             throw new InvalidOperationException($"Configura '{PathKey}' o '{ThumbprintKey}', no los dos.");
+        }
+
         if (!hasPath && !hasThumbprint)
+        {
             throw new InvalidOperationException(
                 $"Falta el certificado. En local: dotnet user-secrets set \"{ThumbprintKey}\" <huella> --project src/VerifactuShopify, " +
                 $"o '{PathKey}' con la ruta a un .pfx.");
+        }
 
         var certificate = hasThumbprint
             ? LoadFromStore(thumbprint!)
             : LoadFromFile(path!, configuration);
 
         if (!certificate.HasPrivateKey)
+        {
             throw new InvalidOperationException("El certificado no incluye la clave privada.");
+        }
 
         // La librería solo lo comprueba al enviar.
         if (certificate.NotAfter < DateTime.Now)
+        {
             throw new InvalidOperationException($"El certificado caducó el {certificate.NotAfter:yyyy-MM-dd}.");
+        }
 
         Warn(certificate);
 
@@ -58,8 +69,10 @@ public static class CertificateSetup
     {
         var days = (int)(certificate.NotAfter - DateTime.Now).TotalDays;
         if (days <= WarningDays)
+        {
             Console.Error.WriteLine(
                 $"Aviso: el certificado caduca el {certificate.NotAfter:yyyy-MM-dd}, {(days == 1 ? "queda 1 día" : $"quedan {days} días")}.");
+        }
     }
 
     static X509Certificate2 LoadFromStore(string thumbprint)
@@ -92,7 +105,9 @@ public static class CertificateSetup
     {
         // Sin esta comprobación la librería devuelve null y el error llega al enviar, sin mencionar la ruta.
         if (!File.Exists(path))
+        {
             throw new FileNotFoundException($"No existe el certificado indicado en '{PathKey}'.", path);
+        }
 
         // No se toca Settings: Wsd.Certificate tiene prioridad sobre la ruta y la huella, y así la
         // contraseña no entra en el objeto que Settings.Save() serializaría en claro. De paso, mirar
@@ -130,10 +145,14 @@ public static class CertificateSetup
     {
         var passwordPath = configuration[PasswordPathKey];
         if (string.IsNullOrWhiteSpace(passwordPath))
+        {
             return configuration[PasswordKey]?.ToCharArray() ?? [];
+        }
 
         if (!File.Exists(passwordPath))
+        {
             throw new FileNotFoundException($"No existe el fichero de contraseña indicado en '{PasswordPathKey}'.", passwordPath);
+        }
 
         return File.ReadAllText(passwordPath).TrimEnd('\r', '\n').ToCharArray();
     }

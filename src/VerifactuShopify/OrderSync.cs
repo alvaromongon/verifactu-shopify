@@ -1,5 +1,7 @@
 using System.Globalization;
+
 using Microsoft.Extensions.Configuration;
+
 using VeriFactu.Business;
 using VeriFactu.Xml.Factu;
 using VeriFactu.Xml.Factu.Consulta.Respuesta;
@@ -111,7 +113,9 @@ public static class OrderSync
             .ToList();
         Console.WriteLine($"Shopify:     {statuses.Count} pagados desde {since:yyyy-MM-dd HH:mm}, {pending.Count} por facturar");
         if (pending.Count == 0)
+        {
             return Success;
+        }
 
         var year = now.Year;
         var next = settings.Series.Next(SeriesNumbersThisYear(records, settings.Series, year, sellerNif, sellerName, sistema, now),
@@ -175,7 +179,7 @@ public static class OrderSync
     // The last number is almost always in the two months already queried. If not (no sales for a
     // while), look further back in the year, month by month, up to the first month that has one:
     // numbers only grow with the issue date, which is what the AEAT groups registros by.
-    static IEnumerable<string> SeriesNumbersThisYear(
+    static List<string> SeriesNumbersThisYear(
         List<RegistroRespuestaConsultaFactuSistemaFacturacion> window, InvoiceSeries series, int year,
         string sellerNif, string sellerName, SistemaInformatico sistema, DateTimeOffset now)
     {

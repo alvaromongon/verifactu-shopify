@@ -62,7 +62,9 @@ public static class OrderInvoiceMapper
     {
         var lines = order.Shipping is null ? order.Lines : [.. order.Lines, order.Shipping];
         if (lines.Count == 0)
+        {
             throw new OrderNotInvoiceableException($"Order {order.Id} has no lines to invoice.");
+        }
 
         return lines
             .Select(line => BuildContribution(order, line))
@@ -83,8 +85,10 @@ public static class OrderInvoiceMapper
     static (decimal Rate, decimal Base, decimal TaxAmount) BuildContribution(ShopifyOrder order, ShopifyOrderLine line)
     {
         if (line.TaxLines.Count != 1)
+        {
             throw new OrderNotInvoiceableException(
                 $"Order {order.Id}, line \"{line.Title}\" has {line.TaxLines.Count} tax lines, expected exactly one.");
+        }
 
         var taxLine = line.TaxLines[0];
         var grossTotal = line.OriginalUnitPrice * line.Quantity - line.DiscountAllocated;

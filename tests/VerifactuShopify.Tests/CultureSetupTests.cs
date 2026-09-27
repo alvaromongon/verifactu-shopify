@@ -14,6 +14,6 @@ public sealed class CultureSetupTests
         Assert.Equal(CultureSetup.Culture, CultureInfo.CurrentCulture.Name);
 
         // La fecha tal y como la escribe la librería en los CSV de la cadena.
-        Assert.Equal(new DateTime(2026, 9, 17, 0, 25, 22), DateTime.Parse("17/09/2026 00:25:22"));
+        Assert.Equal(new DateTime(2026, 9, 17, 0, 25, 22), DateTime.Parse("17/09/2026 00:25:22", CultureInfo.CurrentCulture));
     }
 }
