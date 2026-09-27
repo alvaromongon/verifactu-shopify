@@ -9,7 +9,7 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.12" />
     <!-- Exact version: only versions whose author published a responsible declaration (see README). -->
-    <PackageVersion Include="VeriFactu" Version="[1.0.66]" />
+    <PackageVersion Include="VeriFactu" Version="[1.0.68]" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">
