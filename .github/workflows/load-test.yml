@@ -1,0 +1,59 @@
+name: Load test
+
+# On demand, after changes that may affect a sync run (README > SLO). A nightly schedule is not
+# needed while the connector changes step by step through reviewed pull requests.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  LOAD_TEST: true
+
+jobs:
+  load-test:
+    name: Load test (SLO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # VeriFactu writes its chains under /usr/share/VeriFactu on Linux (mdiago/VeriFactu#273).
+      - name: Create the VeriFactu data folder
+        run: sudo install -d -o "$USER" /usr/share/VeriFactu
+
+      - name: Run the SLO scenarios
+        env:
+          LOAD_TEST_REPORT: ${{ github.workspace }}/artifacts/slo.md
+        run: |
+          mkdir -p artifacts
+          dotnet test --project tests/VerifactuShopify.LoadTests --configuration Release \
+            --results-directory artifacts/TestResults --report-xunit-trx
+
+      - name: Publish report
+        if: always()
+        run: |
+          {
+            echo "## SLO of a sync run"
+            echo
+            if [ -f artifacts/slo.md ]; then cat artifacts/slo.md; else echo "❌ The load test did not produce a report."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-test-results
+          path: artifacts/
+          if-no-files-found: ignore

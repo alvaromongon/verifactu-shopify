@@ -17,6 +17,7 @@ read the relevant sections before working and keep them up to date; do not dupli
 | Folder layout and conventions | *Estructura del proyecto*, *Convenciones de desarrollo* |
 | Certificate, configuration and deployment | *Certificado*, *Despliegue*, *Despliegue como tarea periódica* |
 | Chain rules and VeriFactu local data | *Cadena de registros*, *Datos locales de VeriFactu* |
+| SLO of a sync run and load test | *SLO de una pasada* |
 | CI checks | *Puertas de calidad* |
 
 ## Rules for Claude
@@ -25,6 +26,8 @@ read the relevant sections before working and keep them up to date; do not dupli
   tests use the stubs in `tests/VerifactuShopify.ComponentTests/TestDoubles/`.
 - Only run commands against the AEAT **pre-production** environment, and only when the user asks.
 - Before finishing, run the local gate: `.githooks/pre-push`.
+- The SLO in the README and the objectives, latencies and call bounds in
+  `tests/VerifactuShopify.LoadTests/Sync/OrderSyncSloTests.cs` must stay in sync.
 - VeriFactu is pinned to a version with a published responsible declaration: never bump it without
   checking the declaration exists (see *Dependencia: mdiago/VeriFactu*).
 - Code and code comments in English; README, issues, commit messages and user-facing messages in
@@ -35,4 +38,5 @@ read the relevant sections before working and keep them up to date; do not dupli
 ## Overrides of the personal baseline
 
 - **No Dockerfile or image scan yet**: the container image is issue #23.
-- **No SLO or load test yet**: pending, to be defined for a sync run against the stubs.
+- **SLO of a job, not a service**: measured per sync run, in-process against the stubs, and run on
+  demand (no schedule).
