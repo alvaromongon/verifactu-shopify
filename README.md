@@ -12,6 +12,17 @@ Conector entre Shopify y VERI\*FACTU, el sistema de la Agencia Tributaria (AEAT)
 
 > **Estado: en desarrollo. No lo uses para facturar.** Por ahora solo se prueba contra el entorno de preproducción de la AEAT, que no tiene efectos fiscales. El avance está en los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
 
+## De un vistazo
+
+```bash
+dotnet test --max-parallel-test-modules 1                    # tests unitarios y de componente
+dotnet run --project src/VerifactuShopify -- sincronizar     # una pasada contra preproducción
+```
+
+- **Qué hace**: cada ejecución lee de la AEAT lo ya enviado, pide a Shopify los pedidos pagados y envía un registro por cada pedido que aún no lo tenga ([Sincronización con Shopify](#sincronización-con-shopify)).
+- **Cómo se despliega**: como tarea periódica sin estado, con el certificado entregado como fichero de secreto ([Despliegue como tarea periódica](#despliegue-como-tarea-periódica)).
+- **Calidad**: tests unitarios y de componente con Shopify y la AEAT simulados, cobertura de líneas mínima del 80 %, analizadores con avisos como errores, CodeQL y auditoría de dependencias, todo comprobado en CI en Linux, macOS y Windows ([Puertas de calidad](#puertas-de-calidad)).
+
 ## Aviso legal
 
 Este repositorio **no es un sistema informático de facturación (SIF) certificado** y se entrega **sin declaración responsable**.
@@ -45,13 +56,43 @@ Nada de lo que hay aquí es asesoramiento fiscal. Consulta con tu asesor antes d
 
 ```bash
 dotnet test --max-parallel-test-modules 1
+.githooks/pre-push    # la misma comprobación que CI: formato, build, tests y cobertura
 ```
+
+El primer build activa los hooks versionados (`git config core.hooksPath .githooks`), así que `git push` ejecuta `.githooks/pre-push` y no sube nada si falla.
 
 Los tests no necesitan certificado ni salen a la AEAT: los que cargan un `.pfx` crean uno autofirmado.
 
 - `tests/VerifactuShopify.UnitTests`: tests unitarios.
 - `tests/VerifactuShopify.ComponentTests`: ejecutan la sincronización y los comandos contra Shopify y la AEAT simulados con WireMock. La librería envía a donde indique `Settings.Current.VeriFactuEndPointPrefix`, que los tests apuntan al servicio simulado.
 - Los dos proyectos se ejecutan uno detrás de otro porque comparten la carpeta de cadenas de VeriFactu. Los tests que necesitan esa carpeta vacía se saltan en una máquina que ya tenga cadenas reales; en CI siempre se ejecutan.
+
+## Estructura del proyecto
+
+```
+src/VerifactuShopify/
+  Aeat/           certificado, sistema informático y cadena de registros contra la AEAT
+  Configuration/  lectura de la configuración y cultura del proceso
+  Invoicing/      regla de facturación, serie y mapeo de pedido a factura
+  Shopify/        cliente GraphQL de Shopify y lectura de sus pedidos
+  Sync/           una pasada de la sincronización y su configuración
+  Program.cs      comandos de la línea de comandos
+tests/
+  VerifactuShopify.UnitTests/       mismas carpetas que src
+  VerifactuShopify.ComponentTests/  mismas carpetas que src, contra servicios simulados
+    TestDoubles/                    servicios simulados y utilidades compartidas
+```
+
+Cada proyecto de tests replica las carpetas y los namespaces de `src`. Lo compartido entre tests va en `TestDoubles/`, que es la única carpeta que no replica `src`.
+
+## Convenciones de desarrollo
+
+- **TDD**: primero un test que falla, después el mínimo código que lo pasa, y luego se refactoriza.
+- **Código en inglés**: identificadores y comentarios siguen las convenciones de Microsoft para .NET. Los mensajes para el usuario, este README, las issues y los commits van en español.
+- **Configuración central**: `Directory.Build.props` (analizadores con avisos como errores), `Directory.Packages.props` (versiones de los paquetes; un `PackageReference` nunca lleva `Version`) y `.editorconfig`, que el build aplica.
+- **Dependencias bloqueadas**: los `packages.lock.json` se suben con cada cambio de paquetes, y CI restaura en modo bloqueado.
+- **Un PR por paso**: el plan y las decisiones están en las issues y los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
+- **Desarrollo asistido por IA**: se trabaja con Claude Code como asistente de programación. [`CLAUDE.md`](CLAUDE.md) recoge las reglas que sigue en este repositorio.
 
 ## Certificado
 
@@ -315,6 +356,25 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 - En Linux el usuario que ejecuta la aplicación necesita permiso de escritura en esa carpeta ([mdiago/VeriFactu#273](https://github.com/mdiago/VeriFactu/issues/273)). CI la crea antes de los tests.
 - En modalidad VERI\*FACTU no hace falta conservar esa carpeta: los registros ya los tiene la AEAT, y la cadena se lee de ella en cada envío. En desarrollo, si se conserva, tiene que coincidir con la de la AEAT.
 - La librería escribe y lee esas fechas con la configuración regional del proceso, así que la aplicación la fija a `es-ES`. Sin eso, una cadena escrita en una máquina no se puede leer en otra: un contenedor con la configuración invariante lee `17/09/2026` como mes 17 y falla al iniciarse.
+
+## Puertas de calidad
+
+| Comprobación | Local (`pre-push`) | CI |
+|---|:-:|:-:|
+| Formato (`dotnet format --verify-no-changes`) | ✅ | ✅ |
+| Build con analizadores y avisos como errores | ✅ | ✅ |
+| Tests unitarios y de componente | ✅ | ✅ Linux, macOS y Windows |
+| Cobertura de líneas ≥ 80 % | ✅ | ✅ |
+| Restore bloqueado y paquetes vulnerables | | ✅ |
+| Forma del despliegue: contenedor Linux con el certificado como secreto | | ✅ |
+| Análisis estático con CodeQL | | ✅ |
+
+- **Solo lo necesario**: los jobs de CI y CodeQL solo se ejecutan cuando cambian ficheros que les afectan ([`.github/path-filters.yml`](.github/path-filters.yml)). Un cambio solo de documentación los salta, y aun así los checks aparecen como correctos.
+- **Actualizaciones**: Dependabot propone las de paquetes NuGet y de GitHub Actions.
+- **Pendiente**:
+  - La imagen de contenedor y su escaneo, en [#23](https://github.com/alvaromongon/verifactu-shopify/issues/23).
+  - El SLO de una pasada y su test de carga.
+  - Activar la protección de `main` ([`.github/rulesets/main.json`](.github/rulesets/main.json)).
 
 ## Seguridad
 
