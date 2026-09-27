@@ -3,6 +3,6 @@
     <Project Path="src/VerifactuShopify/VerifactuShopify.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/VerifactuShopify.Tests/VerifactuShopify.Tests.csproj" />
+    <Project Path="tests/VerifactuShopify.UnitTests/VerifactuShopify.UnitTests.csproj" />
   </Folder>
 </Solution>
