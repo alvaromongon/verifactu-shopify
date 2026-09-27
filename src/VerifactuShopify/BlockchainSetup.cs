@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Xml.Linq;
+
 using VeriFactu.Blockchain;
 using VeriFactu.Business.Operations;
 using VeriFactu.Common.Exceptions;
@@ -10,6 +11,7 @@ using VeriFactu.Xml.Factu.Consulta;
 using VeriFactu.Xml.Factu.Consulta.Respuesta;
 using VeriFactu.Xml.Factu.Fault;
 using VeriFactu.Xml.Soap;
+
 using PeriodoImputacion = VeriFactu.Xml.Factu.Consulta.PeriodoImputacion;
 
 namespace VerifactuShopify;
@@ -41,15 +43,19 @@ public static class BlockchainSetup
             .Where(r => r.EstadoRegistro?.EstadoReg != "Incorrecto" && r.DatosRegistroFacturacion?.Huella is not null)
             .ToList();
         if (candidates.Count == 0)
+        {
             return null;
+        }
 
         var latest = candidates.Max(GeneratedAt);
         var tied = candidates.Where(r => GeneratedAt(r) == latest).ToList();
         var referenced = tied.Select(r => r.DatosRegistroFacturacion.Encadenamiento?.RegistroAnterior?.Huella).ToHashSet();
         var heads = tied.Where(r => !referenced.Contains(r.DatosRegistroFacturacion.Huella)).ToList();
         if (heads.Count != 1)
+        {
             throw new InvalidOperationException(
                 $"No se puede determinar el último registro de la cadena: {heads.Count} candidatos generados a las {latest:O}.");
+        }
 
         var head = heads[0];
         return new ChainHead(head.DatosRegistroFacturacion.Huella, head.IDFactura.IDEmisorFactura,
@@ -84,8 +90,11 @@ public static class BlockchainSetup
                 var (respuesta, sifs) = Send(consulta);
                 var page = respuesta.RegistroRespuestaConsultaFactuSistemaFacturacion ?? [];
                 if (page.Length != sifs.Count)
+                {
                     throw new InvalidOperationException(
                         $"La AEAT devolvió {page.Length} registros y {sifs.Count} sistemas informáticos: no se puede saber a qué cadena pertenece cada uno.");
+                }
+
                 registros.AddRange(page.Where((_, i) => IsFrom(sistema, sifs[i])));
                 next = respuesta.IndicadorPaginacion == "S" ? respuesta.ClavePaginacion : null;
             }
@@ -105,7 +114,9 @@ public static class BlockchainSetup
 
         var registro = Envelope.FromXml(response).Body.Registro;
         if (registro is Fault fault)
+        {
             throw new FaultException(fault);
+        }
 
         XNamespace respuesta = Namespaces.NamespaceTikLRRC;
         var sifs = XDocument.Parse(response)
@@ -125,7 +136,9 @@ public static class BlockchainSetup
 
         // Sin SIF, descartar el registro haría creer que la cadena está vacía y empezaría otra.
         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(instalacion))
+        {
             throw new InvalidOperationException("La AEAT no devolvió el sistema informático de un registro: no se puede saber a qué cadena pertenece.");
+        }
 
         return nif == sistema.NIF && id == sistema.IdSistemaInformatico && instalacion == sistema.NumeroInstalacion;
     }
@@ -143,21 +156,28 @@ public static class BlockchainSetup
         {
             var local = Blockchain.Get(sellerNif).Current?.Huella;
             if (local != head?.Huella)
+            {
                 throw new InvalidOperationException(
                     $"La cadena local ({local}) no coincide con la de la AEAT ({head?.Huella ?? "vacía"}). No se envía nada.");
+            }
+
             return;
         }
 
         // La AEAT no tiene nada: el siguiente registro será el primero.
         if (head is null)
+        {
             return;
+        }
 
         // LoadBlockchainsFromDisk falla con cualquier carpeta de emisor que ya estuviera cargada, aunque no
         // tenga cadena. Sin estado, la carpeta de datos arranca vacía.
         var existing = Directory.GetDirectories(blockchainPath).Select(Path.GetFileName).ToList();
         if (existing.Count > 0)
+        {
             throw new InvalidOperationException(
                 $"Para cargar la cadena desde la AEAT, {blockchainPath} tiene que estar vacía. Contiene: {string.Join(", ", existing)}.");
+        }
 
         Directory.CreateDirectory(Path.GetDirectoryName(varFile)!);
         File.WriteAllText(varFile, VarFileLine(head));
@@ -165,8 +185,10 @@ public static class BlockchainSetup
 
         var loaded = Blockchain.Get(sellerNif).Current?.Huella;
         if (loaded != head.Huella)
+        {
             throw new InvalidOperationException(
                 $"La librería no cargó la cabeza de la AEAT ({head.Huella}), sino {loaded ?? "nada"}: ¿ha cambiado el formato de {varFile}?");
+        }
     }
 
     static DateTimeOffset GeneratedAt(RegistroRespuestaConsultaFactuSistemaFacturacion registro) =>

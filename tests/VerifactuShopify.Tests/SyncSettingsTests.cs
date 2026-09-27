@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
+
 using VeriFactu.Xml.Factu.Consulta.Respuesta;
+
 using IDFactura = VeriFactu.Xml.Factu.Respuesta.IDFactura;
 
 namespace VerifactuShopify.Tests;

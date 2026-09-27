@@ -4,38 +4,157 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  # Jobs are skipped (not the whole workflow) when only unrelated files change: a skipped job
+  # still reports its check as successful, so the required checks of the ruleset are satisfied.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ci: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ci == 'true' }}
     steps:
       - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: .github/path-filters.yml
+
+  build-and-test:
+    name: Build & test
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
-      # VeriFactu crea su carpeta de datos al iniciarse. En Linux es /usr/share/VeriFactu, donde el
-      # usuario del runner no puede escribir (mdiago/VeriFactu#273). En macOS y Windows está dentro
-      # del perfil del usuario y la crea la propia librería.
-      - if: runner.os == 'Linux'
-        run: sudo install -d -o "$USER" /usr/share/VeriFactu
-      - run: dotnet test
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
 
-  # La forma que tendrá el despliegue: contenedor Linux, certificado entregado como fichero de
-  # secreto y configuración por variables de entorno. Es lo que la matriz anterior no cubre.
-  despliegue:
+      # VeriFactu creates its data folder on start. On Linux it is /usr/share/VeriFactu, which the
+      # runner user cannot write (mdiago/VeriFactu#273). On macOS and Windows it lives in the user
+      # profile and the library creates it.
+      - name: Create the VeriFactu data folder
+        run: sudo install -d -o "$USER" /usr/share/VeriFactu
+
+      - name: Restore (locked mode)
+        run: dotnet restore --locked-mode
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Verify formatting
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build (warnings as errors)
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Check vulnerable packages
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -q -i "has the following vulnerable packages" vulnerable.txt; then
+            echo "::error::Vulnerable NuGet packages detected."
+            exit 1
+          fi
+
+      - name: Test with coverage
+        run: >
+          dotnet test --configuration Release --no-build
+          --coverage --coverage-output-format cobertura --results-directory artifacts/TestResults
+          --report-xunit-trx
+
+      - name: Coverage gate
+        run: ./build/coverage.sh
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          if [ -f artifacts/coverage/SummaryGithub.md ]; then
+            cat artifacts/coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: |
+            artifacts/TestResults/
+            artifacts/coverage/
+          if-no-files-found: ignore
+
+  # The project supports Linux, macOS and Windows. Separate jobs rather than a matrix: a skipped
+  # matrix job reports its check with the unexpanded name, which never matches a required check.
+  test-windows:
+    name: Tests (Windows)
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Test
+        run: dotnet test --configuration Release
+
+  test-macos:
+    name: Tests (macOS)
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Test
+        run: dotnet test --configuration Release
+
+  # The shape the deployment will have: a Linux container, the certificate delivered as a secret
+  # file and the configuration as environment variables. The jobs above do not cover it.
+  deployment:
+    name: Deployment shape
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container: mcr.microsoft.com/dotnet/sdk:10.0
     steps:
       - uses: actions/checkout@v7
-      # Autofirmado: la AEAT lo rechazaría, pero aquí solo se comprueba cómo llega el certificado.
-      - name: Prepara el secreto
+
+      # Self-signed: the AEAT would reject it, but this only checks how the certificate arrives.
+      - name: Prepare the secret
         run: |
           mkdir -p /run/secrets
           openssl req -x509 -newkey rsa:2048 -nodes -days 400 -subj "/CN=PRUEBA AUTOFIRMADO" \
@@ -45,12 +164,14 @@ jobs:
           openssl pkcs12 -export -inkey /tmp/clave.pem -in /tmp/certificado.pem \
             -out /run/secrets/certificado.pfx -passout file:/run/secrets/certificado.pass
           rm /tmp/clave.pem /tmp/certificado.pem
-      # Antes de los tests: así se comprueba que comprobar el certificado no crea la carpeta de datos.
-      - name: Carga el certificado desde el secreto
+
+      # Before the tests: checks that validating the certificate does not create the data folder.
+      - name: Load the certificate from the secret
         env:
           VeriFactu__CertificatePath: /run/secrets/certificado.pfx
           VeriFactu__CertificatePasswordPath: /run/secrets/certificado.pass
         run: |
           dotnet run --project src/VerifactuShopify -- certificado
           test ! -d /usr/share/VeriFactu
+
       - run: dotnet test

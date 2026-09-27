@@ -28,15 +28,19 @@ public static class ShopifyOrderParser
         var id = order.GetProperty("legacyResourceId").GetString()!;
         var lineItems = order.GetProperty("lineItems");
         if (lineItems.GetProperty("pageInfo").GetProperty("hasNextPage").GetBoolean())
+        {
             throw new OrderNotInvoiceableException($"Order {id} has more lines than a single request returns.");
+        }
 
         var lines = lineItems.GetProperty("nodes").EnumerateArray().Select(line =>
         {
             // Edited after checkout: Shopify's taxes and discounts may no longer match what is left.
             var quantity = line.GetProperty("quantity").GetInt32();
             if (line.GetProperty("currentQuantity").GetInt32() != quantity)
+            {
                 throw new OrderNotInvoiceableException(
                     $"Order {id}, line \"{line.GetProperty("title").GetString()}\" was edited after checkout.");
+            }
 
             return ParseLine(line, quantity, line.GetProperty("originalUnitPriceSet"));
         }).ToList();
@@ -48,7 +52,9 @@ public static class ShopifyOrderParser
             .Where(line => line.OriginalUnitPrice != 0)
             .ToList();
         if (shippingLines.Count > 1)
+        {
             throw new OrderNotInvoiceableException($"Order {id} has {shippingLines.Count} shipping lines, expected at most one.");
+        }
 
         return new ShopifyOrder(
             Id: id,

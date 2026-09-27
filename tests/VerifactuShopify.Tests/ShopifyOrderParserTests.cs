@@ -1,4 +1,5 @@
 using System.Text.Json;
+
 using VeriFactu.Xml.Factu.Alta;
 
 namespace VerifactuShopify.Tests;

@@ -1,10 +1,13 @@
 using System.Globalization;
+
 using Microsoft.Extensions.Configuration;
+
 using VeriFactu.Blockchain;
 using VeriFactu.Business;
 using VeriFactu.Business.Operations;
 using VeriFactu.Config;
 using VeriFactu.Xml.Factu.Alta;
+
 using VerifactuShopify;
 
 // M1: herramienta para probar la librería contra preproducción de la AEAT.
@@ -36,13 +39,16 @@ try
     };
 }
 catch (Exception ex) when (ex is InvalidOperationException
-                            or FileNotFoundException 
-                            or FormatException 
+                            or FileNotFoundException
+                            or FormatException
                             or HttpRequestException)
 {
     // WebException también es InvalidOperationException: sin la interna no se ve por qué falló el TLS.
     for (var e = ex; e is not null; e = e.InnerException)
+    {
         Console.Error.WriteLine(e.Message);
+    }
+
     return 1;
 }
 
@@ -89,7 +95,10 @@ int SendF2()
     Console.WriteLine($"Número:  {invoice.InvoiceID}");
     Console.WriteLine($"URL QR:  {invoice.GetRegistroAlta().GetUrlValidate()}");
     if (sent)
+    {
         Console.WriteLine($"Anular:  dotnet run --project src/VerifactuShopify -- anular {invoice.InvoiceID} {invoice.InvoiceDate.ToString(DateFormat, CultureInfo.InvariantCulture)}");
+    }
+
     return sent ? 0 : 1;
 }
 
@@ -164,7 +173,9 @@ void PrepareSend()
     // M1 solo prueba contra preproducción: un Settings.xml local podría apuntar a producción.
     var endpoint = Settings.Current.VeriFactuEndPointPrefix;
     if (!endpoint.StartsWith("https://prewww", StringComparison.Ordinal))
+    {
         throw new InvalidOperationException($"El endpoint configurado no es de preproducción: {endpoint}");
+    }
 
     // Sin using: la librería lo usa en el envío, a través de Wsd.Certificate.
     var certificate = CertificateSetup.Configure(configuration);

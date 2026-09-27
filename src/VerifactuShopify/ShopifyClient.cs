@@ -91,13 +91,18 @@ public sealed class ShopifyClient
 
         // A 404 is what an unknown shop gets, and the domain people know is usually the public one.
         if (response.StatusCode == HttpStatusCode.NotFound)
+        {
             throw new InvalidOperationException(
                 $"Shopify no encuentra la tienda {shopDomain}. Tiene que ser su dominio *.myshopify.com, " +
                 "no el público: está en el admin de la tienda, en Configuración > Dominios.");
+        }
+
         if (!response.IsSuccessStatusCode)
+        {
             throw new InvalidOperationException(
                 $"Shopify no dio un token para {shopDomain} ({(int)response.StatusCode}). " +
                 "Revisa el client ID y el secreto, y que la app esté instalada en la tienda y sea de su misma organización.");
+        }
 
         var token = await response.Content.ReadFromJsonAsync<JsonElement>();
 
@@ -105,9 +110,11 @@ public sealed class ShopifyClient
         // this check a missing scope surfaces later as a bare "Access denied for orders field".
         var scopes = token.GetProperty("scope").GetString()?.Split(',') ?? [];
         if (!scopes.Contains(RequiredScope))
+        {
             throw new InvalidOperationException(
                 $"La app no tiene el permiso {RequiredScope} en {shopDomain} (tiene: {(scopes is [""] or [] ? "ninguno" : string.Join(", ", scopes))}). " +
                 "Añádelo a la versión de la app en el Dev Dashboard, publícala y apruébalo en la tienda.");
+        }
 
         return new ShopifyClient(http, shopDomain, token.GetProperty("access_token").GetString()!);
     }
@@ -151,11 +158,15 @@ public sealed class ShopifyClient
 
             using var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
+            {
                 throw new InvalidOperationException($"La API de Shopify respondió {(int)response.StatusCode} {response.ReasonPhrase}.");
+            }
 
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             if (!body.TryGetProperty("errors", out var errors))
+            {
                 return body.GetProperty("data");
+            }
 
             // The query cost bucket refills within seconds; anything else is a bug in the query.
             if (IsThrottled(errors) && attempt < MaxThrottledRetries)

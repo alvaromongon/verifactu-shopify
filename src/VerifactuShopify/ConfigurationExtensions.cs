@@ -20,10 +20,14 @@ static class ConfigurationExtensions
     {
         var path = configuration[$"{key}Path"];
         if (string.IsNullOrWhiteSpace(path))
+        {
             return configuration.GetRequired(key);
+        }
 
         if (!File.Exists(path))
+        {
             throw new FileNotFoundException($"No existe el fichero indicado en '{key}Path'.", path);
+        }
 
         return File.ReadAllText(path).TrimEnd('\r', '\n');
     }

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # VeriFactu is pinned to an exact version: a Dependabot PR for it fails VeriFactuPackageTests until
+  # the responsible declaration of the new version is checked and the test updated (see README).
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      microsoft:
+        patterns: ["Microsoft.*", "System.*"]
+      testing:
+        patterns: ["xunit*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
