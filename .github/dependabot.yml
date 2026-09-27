@@ -10,7 +10,7 @@ updates:
       microsoft:
         patterns: ["Microsoft.*", "System.*"]
       testing:
-        patterns: ["xunit*"]
+        patterns: ["xunit*", "WireMock.Net"]
 
   - package-ecosystem: github-actions
     directory: /

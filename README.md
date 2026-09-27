@@ -44,10 +44,14 @@ Nada de lo que hay aquí es asesoramiento fiscal. Consulta con tu asesor antes d
 ## Compilar y probar
 
 ```bash
-dotnet test
+dotnet test --max-parallel-test-modules 1
 ```
 
 Los tests no necesitan certificado ni salen a la AEAT: los que cargan un `.pfx` crean uno autofirmado.
+
+- `tests/VerifactuShopify.UnitTests`: tests unitarios.
+- `tests/VerifactuShopify.ComponentTests`: ejecutan la sincronización y los comandos contra Shopify y la AEAT simulados con WireMock. La librería envía a donde indique `Settings.Current.VeriFactuEndPointPrefix`, que los tests apuntan al servicio simulado.
+- Los dos proyectos se ejecutan uno detrás de otro porque comparten la carpeta de cadenas de VeriFactu. Los tests que necesitan esa carpeta vacía se saltan en una máquina que ya tenga cadenas reales; en CI siempre se ejecutan.
 
 ## Certificado
 
