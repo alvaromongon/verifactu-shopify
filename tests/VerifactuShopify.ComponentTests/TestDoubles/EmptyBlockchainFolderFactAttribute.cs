@@ -16,7 +16,7 @@ public sealed class EmptyBlockchainFolderFactAttribute : FactAttribute
         var root = Environment.GetFolderPath(OperatingSystem.IsMacOS()
             ? Environment.SpecialFolder.ApplicationData
             : Environment.SpecialFolder.CommonApplicationData);
-        var blockchains = Path.Combine(root, "VeriFactu", "Blockchains");
+        var blockchains = Path.Join(root, "VeriFactu", "Blockchains");
 
         if (Directory.Exists(blockchains) && Directory.EnumerateDirectories(blockchains).Any())
         {

@@ -11,6 +11,9 @@ public sealed class ShopifyStub : IDisposable
 {
     public const string Shop = "tienda-de-prueba.myshopify.com";
 
+    // A JSON null in the anonymous response objects, which need a typed value.
+    const string? JsonNull = null;
+
     readonly WireMockServer _server = WireMockServer.Start();
 
     public ShopifyStub() => GivenToken("read_orders");
@@ -48,7 +51,7 @@ public sealed class ShopifyStub : IDisposable
                         legacyResourceId = order.Id,
                         name = named?[i].Name ?? $"#{order.Id}",
                         test = false,
-                        cancelledAt = (string?)null,
+                        cancelledAt = JsonNull,
                         displayFinancialStatus = "PAID",
                         transactions = new[] { new { kind = "SALE", status = "SUCCESS", processedAt = order.PaidAt.ToString("O") } },
                     }),
@@ -63,7 +66,7 @@ public sealed class ShopifyStub : IDisposable
         GivenGraphql(operation, new { errors });
 
     public ShopifyStub GivenMissingOrder(string id) =>
-        GivenGraphql($"gid://shopify/Order/{id}", new { data = new { order = (object?)null } });
+        GivenGraphql($"gid://shopify/Order/{id}", new { data = new { order = JsonNull } });
 
     public ShopifyStub GivenGraphqlStatus(int status)
     {

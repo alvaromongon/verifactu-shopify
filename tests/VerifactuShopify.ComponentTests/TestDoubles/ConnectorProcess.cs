@@ -14,7 +14,8 @@ public static class ConnectorProcess
     public static Result Run(Dictionary<string, string?> environment, params string[] args)
     {
         var entryPoint = typeof(OrderSync).Assembly.EntryPoint!;
-        var (output, error) = (new StringWriter(), new StringWriter());
+        using var output = new StringWriter();
+        using var error = new StringWriter();
         var (originalOutput, originalError) = (Console.Out, Console.Error);
         var endpoint = Settings.Current.VeriFactuEndPointPrefix;
         foreach (var (key, value) in environment)

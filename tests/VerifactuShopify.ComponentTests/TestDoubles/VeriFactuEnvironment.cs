@@ -33,14 +33,14 @@ public sealed class VeriFactuEnvironment : IDisposable
     // Removes a fictitious seller's chain, on disk and wherever else the library keeps it.
     public static void DeleteChain(string sellerNif)
     {
-        var chain = Path.Combine(Settings.Current.BlockchainPath, sellerNif);
+        var chain = Path.Join(Settings.Current.BlockchainPath, sellerNif);
         if (Directory.Exists(chain))
         {
             Directory.Delete(chain, recursive: true);
         }
     }
 
-    string Folder(string name) => Directory.CreateDirectory(Path.Combine(_root, name)).FullName + Path.DirectorySeparatorChar;
+    string Folder(string name) => Directory.CreateDirectory(Path.Join(_root, name)).FullName + Path.DirectorySeparatorChar;
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }

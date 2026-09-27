@@ -30,7 +30,7 @@ public sealed class ProgramTests : IDisposable
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=TITULAR DE PRUEBA", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var certificate = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddYears(1));
-        var path = Path.Combine(_folder, "certificado.pfx");
+        var path = Path.Join(_folder, "certificado.pfx");
         File.WriteAllBytes(path, certificate.Export(X509ContentType.Pfx, Password));
         return path;
     }
@@ -56,7 +56,7 @@ public sealed class ProgramTests : IDisposable
     [Fact]
     public void A_missing_certificate_file_fails_naming_the_setting()
     {
-        var path = Path.Combine(_folder, "no-existe.pfx");
+        var path = Path.Join(_folder, "no-existe.pfx");
 
         var result = ConnectorProcess.Run(Certificate(path), "certificado");
 
