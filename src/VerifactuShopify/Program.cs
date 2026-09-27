@@ -8,18 +8,20 @@ using VeriFactu.Business.Operations;
 using VeriFactu.Config;
 using VeriFactu.Xml.Factu.Alta;
 
-using VerifactuShopify;
+using VerifactuShopify.Aeat;
+using VerifactuShopify.Configuration;
+using VerifactuShopify.Sync;
 
-// M1: herramienta para probar la librería contra preproducción de la AEAT.
-const string SellerNifKey = VerifactuShopify.ConfigurationExtensions.SellerNifKey;
-const string SellerNameKey = VerifactuShopify.ConfigurationExtensions.SellerNameKey;
+// M1: tool to try the library against the AEAT pre-production environment.
+const string SellerNifKey = VerifactuShopify.Configuration.ConfigurationExtensions.SellerNifKey;
+const string SellerNameKey = VerifactuShopify.Configuration.ConfigurationExtensions.SellerNameKey;
 const string DateFormat = "dd-MM-yyyy";
 
-// Antes de tocar nada de VeriFactu: la cultura decide cómo se lee la cadena de bloques.
+// Before touching anything in VeriFactu: the culture decides how the blockchain is read.
 CultureSetup.Configure();
 
-// Las variables de entorno van después para que el despliegue pueda inyectar el certificado
-// sobre lo que haya en user-secrets (VeriFactu__CertificatePath, VeriFactu__CertificatePasswordPath).
+// Environment variables go last so the deployment can inject the certificate over whatever is in
+// user-secrets (VeriFactu__CertificatePath, VeriFactu__CertificatePasswordPath).
 var configuration = new ConfigurationBuilder()
     .AddUserSecrets<Program>()
     .AddEnvironmentVariables().Build();
@@ -43,7 +45,7 @@ catch (Exception ex) when (ex is InvalidOperationException
                             or FormatException
                             or HttpRequestException)
 {
-    // WebException también es InvalidOperationException: sin la interna no se ve por qué falló el TLS.
+    // WebException is an InvalidOperationException too: without the inner one, the TLS failure reason is lost.
     for (var e = ex; e is not null; e = e.InnerException)
     {
         Console.Error.WriteLine(e.Message);
@@ -151,7 +153,7 @@ int ShowChain()
         ? "AEAT:        sin registros de este SIF en el mes actual ni en el anterior"
         : $"AEAT:        {head.NumSerie} {head.FechaExpedicion} {head.Huella} (generado {head.GeneratedAt:O})");
 
-    // Sin tocar la cadena local si no existe: Blockchain.Get crearía su carpeta.
+    // Leave the local chain alone if it doesn't exist: Blockchain.Get would create its folder.
     var local = File.Exists(Path.Combine(Settings.Current.BlockchainPath, sellerNif, $"_{sellerNif}.csv"))
         ? Blockchain.Get(sellerNif).Current
         : null;
@@ -170,25 +172,25 @@ async Task<int> Sync()
 
 void PrepareSend()
 {
-    // M1 solo prueba contra preproducción: un Settings.xml local podría apuntar a producción.
+    // M1 only tests against pre-production: a local Settings.xml could point to production.
     var endpoint = Settings.Current.VeriFactuEndPointPrefix;
     if (!endpoint.StartsWith("https://prewww", StringComparison.Ordinal))
     {
         throw new InvalidOperationException($"El endpoint configurado no es de preproducción: {endpoint}");
     }
 
-    // Sin using: la librería lo usa en el envío, a través de Wsd.Certificate.
+    // No using: the library uses it when sending, through Wsd.Certificate.
     var certificate = CertificateSetup.Configure(configuration);
     SistemaInformaticoSetup.Configure(configuration);
 
     Console.WriteLine($"Endpoint:    {endpoint}");
     Console.WriteLine($"Certificado: {certificate.Subject}");
-    // Los registros se fechan con la hora local del proceso, que tiene que ser la del territorio desde
-    // donde se expide (art. 7.e de la Orden HAC/1177/2024): en un contenedor, TZ=Europe/Madrid.
+    // Registros are dated with the process local time, which must be the one of the territory they're
+    // issued from (art. 7.e of Orden HAC/1177/2024): in a container, TZ=Europe/Madrid.
     Console.WriteLine($"Huso:        {TimeZoneInfo.Local.Id} ({DateTimeOffset.Now:zzz})");
 }
 
-// Antes de crear ningún registro: la AEAT es la fuente de verdad de la cadena (#12).
+// Before creating any registro: the AEAT is the source of truth for the chain (#12).
 void LoadChainFromAeat()
 {
     var sellerNif = configuration.GetRequired(SellerNifKey);
