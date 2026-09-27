@@ -31,9 +31,24 @@ public sealed partial class AeatStub : IDisposable
         GivenAltasAccepted();
     }
 
-    // Registros the AEAT returns for every period queried.
-    public AeatStub GivenRecords(SistemaInformatico? sistema = null, params RegistroRespuestaConsultaFactuSistemaFacturacion[] registros) =>
-        GivenConsulta(Page(sistema, registros, next: null));
+    // Registros the AEAT returns when queried for the period of their issue date (dd-MM-yyyy); the
+    // other periods have none. Without registros, every period is empty.
+    public AeatStub GivenRecords(SistemaInformatico? sistema = null, params RegistroRespuestaConsultaFactuSistemaFacturacion[] registros)
+    {
+        if (registros.Length == 0)
+        {
+            return GivenConsulta(Page(sistema, registros, next: null));
+        }
+
+        var fecha = registros[0].IDFactura.FechaExpedicionFactura.Split('-');
+        var (ejercicio, periodo) = (fecha[2], fecha[1]);
+        _server.Given(Request.Create().UsingPost().WithBody(body =>
+                body?.Contains(Consulta, StringComparison.Ordinal) == true &&
+                body.Contains($"Ejercicio>{ejercicio}<", StringComparison.Ordinal) &&
+                body.Contains($"Periodo>{periodo}<", StringComparison.Ordinal)))
+            .RespondWith(Response.Create().WithHeader("Content-Type", "text/xml").WithBody(Page(sistema, registros, next: null)));
+        return this;
+    }
 
     // Registros in two pages: the second one is asked for with the key the first one returns.
     public AeatStub GivenPagedRecords(
