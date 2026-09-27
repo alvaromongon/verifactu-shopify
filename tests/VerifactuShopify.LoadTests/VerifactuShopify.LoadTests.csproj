@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Its tests are skipped unless LOAD_TEST=true: a run where all are skipped is not a failure. -->
+  <PropertyGroup>
+    <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --ignore-exit-code 8</TestingPlatformCommandLineArguments>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="WireMock.Net" />
+    <PackageReference Include="xunit.v3.mtp-v2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- The same stubs as the component tests, compiled in so both measure the same services. -->
+  <ItemGroup>
+    <Compile Include="..\VerifactuShopify.ComponentTests\TestDoubles\*.cs" LinkBase="TestDoubles\Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VerifactuShopify\VerifactuShopify.csproj" />
+  </ItemGroup>
+
+</Project>

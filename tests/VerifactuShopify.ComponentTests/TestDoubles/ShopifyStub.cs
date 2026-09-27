@@ -15,8 +15,14 @@ public sealed class ShopifyStub : IDisposable
     const string? JsonNull = null;
 
     readonly WireMockServer _server = WireMockServer.Start();
+    readonly TimeSpan _latency;
 
-    public ShopifyStub() => GivenToken("read_orders");
+    // latency: added to every response, to measure a run as it would go against the real API.
+    public ShopifyStub(TimeSpan latency = default)
+    {
+        _latency = latency;
+        GivenToken("read_orders");
+    }
 
     public HttpClient CreateClient() => new(new RedirectToStubHandler(new Uri(_server.Url!)));
 
@@ -30,7 +36,7 @@ public sealed class ShopifyStub : IDisposable
     public ShopifyStub GivenTokenStatus(int status)
     {
         _server.Given(Request.Create().WithPath("/admin/oauth/access_token").UsingPost())
-            .RespondWith(Response.Create().WithStatusCode(status));
+            .RespondWith(Respond().WithStatusCode(status));
         return this;
     }
 
@@ -71,7 +77,7 @@ public sealed class ShopifyStub : IDisposable
     public ShopifyStub GivenGraphqlStatus(int status)
     {
         _server.Given(Request.Create().WithPath("/admin/api/*/graphql.json").UsingPost())
-            .RespondWith(Response.Create().WithStatusCode(status));
+            .RespondWith(Respond().WithStatusCode(status));
         return this;
     }
 
@@ -96,8 +102,11 @@ public sealed class ShopifyStub : IDisposable
     }
 
     // System.Text.Json, as Shopify's JSON is read with it and the orders are JsonElements.
-    static IResponseBuilder Json(object body) =>
-        Response.Create().WithHeader("Content-Type", "application/json").WithBody(JsonSerializer.Serialize(body));
+    IResponseBuilder Json(object body) =>
+        Respond().WithHeader("Content-Type", "application/json").WithBody(JsonSerializer.Serialize(body));
+
+    // WireMock rejects a zero delay.
+    IResponseBuilder Respond() => _latency > TimeSpan.Zero ? Response.Create().WithDelay(_latency) : Response.Create();
 
     public void Dispose() => _server.Dispose();
 }

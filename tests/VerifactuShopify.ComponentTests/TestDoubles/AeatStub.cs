@@ -23,9 +23,12 @@ public sealed partial class AeatStub : IDisposable
     const string Alta = "RegFactuSistemaFacturacion";
 
     readonly WireMockServer _server = WireMockServer.Start();
+    readonly TimeSpan _latency;
 
-    public AeatStub()
+    // latency: added to every response, to measure a run as it would go against the real service.
+    public AeatStub(TimeSpan latency = default)
     {
+        _latency = latency;
         Settings.Current.VeriFactuEndPointPrefix = $"{_server.Url}/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP";
         GivenRecords();
         GivenAltasAccepted();
@@ -46,7 +49,7 @@ public sealed partial class AeatStub : IDisposable
                 body?.Contains(Consulta, StringComparison.Ordinal) == true &&
                 body.Contains($"Ejercicio>{ejercicio}<", StringComparison.Ordinal) &&
                 body.Contains($"Periodo>{periodo}<", StringComparison.Ordinal)))
-            .RespondWith(Response.Create().WithHeader("Content-Type", "text/xml").WithBody(Page(sistema, registros, next: null)));
+            .RespondWith(Respond().WithHeader("Content-Type", "text/xml").WithBody(Page(sistema, registros, next: null)));
         return this;
     }
 
@@ -59,7 +62,7 @@ public sealed partial class AeatStub : IDisposable
         GivenConsulta(Page(sistema, [first], key));
         _server.Given(Request.Create().UsingPost().WithBody(body =>
                 body?.Contains(Consulta, StringComparison.Ordinal) == true && body.Contains("ClavePaginacion", StringComparison.Ordinal)))
-            .RespondWith(Response.Create().WithHeader("Content-Type", "text/xml").WithBody(Page(sistema, [second], next: null)));
+            .RespondWith(Respond().WithHeader("Content-Type", "text/xml").WithBody(Page(sistema, [second], next: null)));
         return this;
     }
 
@@ -67,7 +70,7 @@ public sealed partial class AeatStub : IDisposable
     public AeatStub GivenFault(string message)
     {
         _server.Given(Request.Create().UsingPost().WithBody(body => body?.Contains(Consulta, StringComparison.Ordinal) == true))
-            .RespondWith(Response.Create().WithHeader("Content-Type", "text/xml").WithBody($"""
+            .RespondWith(Respond().WithHeader("Content-Type", "text/xml").WithBody($"""
                 <?xml version="1.0" encoding="UTF-8"?>
                 <env:Envelope xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"><env:Body><env:Fault><faultcode>env:Client</faultcode><faultstring>{message}</faultstring></env:Fault></env:Body></env:Envelope>
                 """));
@@ -77,7 +80,7 @@ public sealed partial class AeatStub : IDisposable
     AeatStub GivenConsulta(string response)
     {
         _server.Given(Request.Create().UsingPost().WithBody(body => body?.Contains(Consulta, StringComparison.Ordinal) == true))
-            .RespondWith(Response.Create().WithHeader("Content-Type", "text/xml").WithBody(response));
+            .RespondWith(Respond().WithHeader("Content-Type", "text/xml").WithBody(response));
         return this;
     }
 
@@ -119,7 +122,7 @@ public sealed partial class AeatStub : IDisposable
     public AeatStub GivenAltasFail()
     {
         _server.Given(Request.Create().UsingPost().WithBody(body => body?.Contains(Alta, StringComparison.Ordinal) == true))
-            .RespondWith(Response.Create().WithStatusCode(503));
+            .RespondWith(Respond().WithStatusCode(503));
         return this;
     }
 
@@ -140,7 +143,7 @@ public sealed partial class AeatStub : IDisposable
     AeatStub GivenAltas(Func<string, string> body)
     {
         _server.Given(Request.Create().UsingPost().WithBody(request => request?.Contains(Alta, StringComparison.Ordinal) == true))
-            .RespondWith(Response.Create().WithCallback(request => new WireMock.ResponseMessage
+            .RespondWith(Respond().WithCallback(request => new WireMock.ResponseMessage
             {
                 StatusCode = 200,
                 Headers = new Dictionary<string, WireMock.Types.WireMockList<string>> { ["Content-Type"] = new("text/xml") },
@@ -158,6 +161,9 @@ public sealed partial class AeatStub : IDisposable
 
     [GeneratedRegex("NumSerieFactura>([^<]+)<")]
     private static partial Regex NumSerie();
+
+    // WireMock rejects a zero delay.
+    IResponseBuilder Respond() => _latency > TimeSpan.Zero ? Response.Create().WithDelay(_latency) : Response.Create();
 
     public void Dispose() => _server.Dispose();
 }

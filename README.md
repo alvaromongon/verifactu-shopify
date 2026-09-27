@@ -357,6 +357,32 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 - En modalidad VERI\*FACTU no hace falta conservar esa carpeta: los registros ya los tiene la AEAT, y la cadena se lee de ella en cada envío. En desarrollo, si se conserva, tiene que coincidir con la de la AEAT.
 - La librería escribe y lee esas fechas con la configuración regional del proceso, así que la aplicación la fija a `es-ES`. Sin eso, una cadena escrita en una máquina no se puede leer en otra: un contenedor con la configuración invariante lee `17/09/2026` como mes 17 y falla al iniciarse.
 
+## SLO de una pasada
+
+El conector no es un servicio que atienda peticiones, sino una tarea periódica, así que los objetivos se refieren a una pasada de `sincronizar`:
+
+| Objetivo | Valor |
+|---|---|
+| Pasada normal, con 10 pedidos pendientes | < 15 s |
+| Pasada con acumulación, con 200 pedidos pendientes (vuelta tras una parada) | < 3 min |
+| Errores | 0: la pasada termina con código 0 |
+| Protección de Shopify | 1 token + 1 consulta de estados por cada 50 pedidos + 1 lectura por pedido pendiente |
+| Protección de la AEAT | como mucho 1 consulta por mes transcurrido del año + 1 envío por pedido pendiente |
+
+- **Cómo se mide**: con [`tests/VerifactuShopify.LoadTests`](tests/VerifactuShopify.LoadTests), que ejecuta la pasada contra los mismos servicios simulados que los tests de componente, con latencias de 100 ms para Shopify y 300 ms para la AEAT.
+- **Entorno de referencia**: un runner `ubuntu-latest` de GitHub.
+- **Cuándo se ejecuta**: bajo demanda, tras cambios que afecten a una pasada, desde el workflow [*Load test*](.github/workflows/load-test.yml). Publica el informe en el resumen de la ejecución.
+- **En local**:
+
+  ```bash
+  LOAD_TEST=true dotnet test --project tests/VerifactuShopify.LoadTests -c Release
+  ```
+
+- **Consultas a la AEAT**: normalmente son 2, el mes actual y el anterior. Si la serie aún no tiene ningún número ese año, el conector busca el último mes a mes hacia atrás, hasta enero.
+- **Envíos a la AEAT**: hoy se hace uno por pedido. Cambiará con el control de flujo de la AEAT ([#30](https://github.com/alvaromongon/verifactu-shopify/issues/30)), y con él este objetivo.
+
+**Calibración.** Primera medición, en un Mac con Apple Silicon: la pasada normal tardó 7,4 s y la de 200 pedidos 85,8 s, unos 0,4 s por pedido (las dos latencias de los servicios simulados más el trabajo de la librería). Los objetivos dejan margen para un runner más lento. Hay que confirmarlos con la primera ejecución en el entorno de referencia.
+
 ## Puertas de calidad
 
 | Comprobación | Local (`pre-push`) | CI |
@@ -368,12 +394,12 @@ La librería guarda su configuración, la cadena de bloques y los registros en u
 | Restore bloqueado y paquetes vulnerables | | ✅ |
 | Forma del despliegue: contenedor Linux con el certificado como secreto | | ✅ |
 | Análisis estático con CodeQL | | ✅ |
+| SLO de una pasada | | ✅ bajo demanda |
 
 - **Solo lo necesario**: los jobs de CI y CodeQL solo se ejecutan cuando cambian ficheros que les afectan ([`.github/path-filters.yml`](.github/path-filters.yml)). Un cambio solo de documentación los salta, y aun así los checks aparecen como correctos.
 - **Actualizaciones**: Dependabot propone las de paquetes NuGet y de GitHub Actions.
 - **Pendiente**:
   - La imagen de contenedor y su escaneo, en [#23](https://github.com/alvaromongon/verifactu-shopify/issues/23).
-  - El SLO de una pasada y su test de carga.
   - Activar la protección de `main` ([`.github/rulesets/main.json`](.github/rulesets/main.json)).
 
 ## Seguridad
