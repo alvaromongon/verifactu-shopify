@@ -398,9 +398,11 @@ El conector no es un servicio que atienda peticiones, sino una tarea periódica,
 
 - **Solo lo necesario**: los jobs de CI y CodeQL solo se ejecutan cuando cambian ficheros que les afectan ([`.github/path-filters.yml`](.github/path-filters.yml)). Un cambio solo de documentación los salta, y aun así los checks aparecen como correctos.
 - **Actualizaciones**: Dependabot propone las de paquetes NuGet y de GitHub Actions.
-- **Pendiente**:
-  - La imagen de contenedor y su escaneo, en [#23](https://github.com/alvaromongon/verifactu-shopify/issues/23).
-  - Activar la protección de `main` ([`.github/rulesets/main.json`](.github/rulesets/main.json)).
+- **`main` está protegida** por un ruleset ([definición](.github/rulesets/main.json)):
+  - Todo cambio entra por un PR, con los checks `Build & test`, `Tests (Windows)`, `Tests (macOS)`, `Deployment shape` y `Analyze C#` en verde.
+  - La rama tiene que estar al día con `main`, y los hilos de revisión, resueltos.
+  - El historial es lineal, y no se admiten push forzados ni borrar la rama.
+- **Pendiente**: la imagen de contenedor y su escaneo, en [#23](https://github.com/alvaromongon/verifactu-shopify/issues/23).
 
 ## Seguridad
 
