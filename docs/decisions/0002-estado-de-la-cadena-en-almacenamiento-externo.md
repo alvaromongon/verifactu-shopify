@@ -26,10 +26,26 @@ Hay que decidir dónde vive el estado de la cadena. La condición es mantener un
 
 **Conclusión**: lo más seguro es tratar los registros rechazados como parte de la cadena. Hoy el conector no lo hace. Tras un rechazo, que ya para la ejecución, la siguiente encadenaría con el último registro aceptado.
 
+## Prueba con la 1.0.68 en preproducción (2026-09-28)
+
+Programa aislado, con su propia carpeta (`VeriFactuEnvironment.Path`), su propio `NumeroInstalacion` y `DisableBlockchainDelete = true`:
+
+| Paso | Resultado |
+|---|---|
+| Carpeta en una ruta propia | Funciona: la librería crea allí `Blockchains`, `Invoices`, `Outbox` e `Inbox` |
+| Envío sin respuesta (fallo de TLS o puerto cerrado) | El eslabón se queda en la cadena local |
+| Alta rechazada (3000, duplicado) | El eslabón se queda en la cadena local |
+| Alta siguiente | Encadena con el rechazado y la AEAT la acepta como «Correcto», aunque nunca recibió esa huella |
+| Reenvío con `InvoiceRetrySend` | La AEAT recibe el registro original (misma huella, mismo anterior, misma fecha de generación), pero **la librería añade en local un eslabón nuevo** que encadena con el original y nunca se envía |
+
+- **`InvoiceRetrySend` está pensado para el modo por defecto**, en el que el eslabón ya se ha borrado y se vuelve a añadir con la misma huella. Con `DisableBlockchainDelete` deja un eslabón fantasma: el siguiente registro encadenaría con una huella que no corresponde a ningún registro. Los dos mecanismos no se pueden combinar.
+- **Tamaño**: unos 7,5 KB por envío (el XML en `Invoices` y en `Outbox`, y la respuesta en `Inbox`) y unos 380 bytes por eslabón en la cadena. Con 1.000 pedidos al mes, unos 90 MB al año.
+
 ## Factores de decisión
 
 - Cumplir el art. 7: encadenar con el último registro generado, también si fue rechazado.
 - Reenviar el mismo registro cuando un envío se queda sin respuesta, como pide la FAQ de la AEAT, en lugar de generar otro.
+- No descargar en cada ejecución una carpeta que crece sin límite.
 - Despliegue sin estado en el host: cronjob o función serverless.
 - Si hace falta estado, la pieza externa más sencilla y disponible en cualquier nube.
 - Depender lo menos posible de formatos internos de la librería y alinearse con cómo espera usarse. El autor recomienda persistir su carpeta.
@@ -44,22 +60,21 @@ Hay que decidir dónde vive el estado de la cadena. La condición es mantener un
 
 ## Decisión
 
-Opción propuesta: «B, la carpeta de la librería en un almacenamiento de objetos». Es la única que cumple el art. 7 sin escribir ficheros internos de la librería. Además, permite reenviar el mismo registro con `InvoiceRetrySend` y es la forma de uso que recomienda el autor. El despliegue sigue sin estado en el host: el estado está en un bucket.
+Opción propuesta: «B, la carpeta de la librería en un almacenamiento de objetos». Es la única que cumple el art. 7 sin escribir ficheros internos de la librería, y es la forma de uso que recomienda el autor. El despliegue sigue sin estado en el host: el estado está en un bucket.
 
 Cómo sería una ejecución, por emisor:
 
 1. Adquirir el cerrojo con una escritura condicional en el mismo bucket: `If-None-Match` en S3, o un *lease* en Blob. Esto resuelve también [#16](https://github.com/alvaromongon/verifactu-shopify/issues/16).
-2. Descargar la carpeta a un directorio temporal y apuntar la librería a ella con `VeriFactuEnvironment.Path`.
+2. Descargar la cadena (`Blockchains`) y los envíos pendientes a un directorio temporal, y apuntar la librería a él con `VeriFactuEnvironment.Path`. Lo ya enviado se queda en el bucket y no se descarga.
 3. Comprobar la cabeza local contra la AEAT, como hace hoy `cadena`. Si la AEAT está un registro por delante y ese registro encadena con la cabeza local, fue un envío aceptado cuyo estado no llegó a subirse. En cualquier otro caso, parar.
 4. Enviar con `DisableBlockchainDelete = true`, para que un rechazo o un envío sin respuesta no saquen el registro de la cadena. Subir los ficheros cambiados tras cada envío.
-5. Si hay un envío pendiente de respuesta, reenviarlo con `InvoiceRetrySend` antes de generar otro.
+5. Si hay un envío pendiente de respuesta, reenviar su XML tal cual (el de `Outbox`) antes de generar otro. No con `InvoiceRetrySend`, que con `DisableBlockchainDelete` añade un eslabón fantasma.
 6. Liberar el cerrojo.
 
 **Confianza**: media.
 - Lo que falta confirmar:
   - Que los registros rechazados forman parte de la cadena. Es la lectura más segura, pero no está escrita de forma expresa. Pregunta para el asesor o para la AEAT.
-  - Cómo se comporta la 1.0.68 con `DisableBlockchainDelete` y `InvoiceRetrySend`.
-  - Cuánto crece la carpeta.
+  - Cómo quiere el autor que se reenvíe con `DisableBlockchainDelete`: si `InvoiceRetrySend` debería no añadir el eslabón cuando ya está en la cadena.
 - Lo que haría revisar esta decisión: que la AEAT confirme lo contrario, o que la librería ofrezca otra forma de persistir su estado.
 
 ### Consecuencias
@@ -70,13 +85,14 @@ Cómo sería una ejecución, por emisor:
 - Buena: desaparece el límite de dos meses de consulta ([#22](https://github.com/alvaromongon/verifactu-shopify/issues/22)) y el de anular solo facturas recientes: la cabeza ya no se busca en la AEAT.
 - Mala: el despliegue necesita un bucket, sus credenciales y su copia de seguridad. Perderlo exige recuperar la cabeza de la AEAT, que es el mecanismo actual y queda como plan de emergencia.
 - Mala: exige la 1.0.68, que trae el modo NO VERI\*FACTU y más cambios que revisar.
+- Mala: el reenvío depende de dónde deja la librería el XML enviado (`Outbox`, con sufijo `.ERR` si falló), hasta que `InvoiceRetrySend` funcione con `DisableBlockchainDelete`.
 - Mala: hay que abstraer el almacenamiento para no depender de una nube, con al menos dos implementaciones (S3 y Blob) y sus tests.
 - Mala: entre un envío aceptado y la subida hay una ventana en la que el estado del bucket queda por detrás de la AEAT. El paso 3 lo detecta.
 
 ### Confirmación
 
 - Tests de componente con un almacenamiento de objetos simulado: rechazo, envío sin respuesta, caída entre envío y subida, y cerrojo ocupado.
-- Una prueba en preproducción con un registro rechazado a propósito, comprobando que el siguiente encadena con él.
+- La prueba en preproducción de este ADR, repetida con el conector: un registro rechazado a propósito y un envío sin respuesta, comprobando que el siguiente encadena con cada uno y que no hay eslabones fantasma.
 
 ## Pros y contras de las opciones
 
@@ -89,11 +105,12 @@ Cómo sería una ejecución, por emisor:
 
 ### B. La carpeta de la librería en un almacenamiento de objetos
 
-- Bien: cumple el art. 7 y la FAQ de reenvío, con los mecanismos de la propia librería.
+- Bien: cumple el art. 7 con el mecanismo de la propia librería (`DisableBlockchainDelete`) y permite reenviar el mismo registro.
+- Neutral: sin las facturas ya enviadas en la carpeta, la librería no detecta en local un número duplicado; lo rechaza la AEAT (3000), y ese rechazo queda en la cadena como cualquier otro.
 - Bien: host sin estado; el bucket es la pieza externa más sencilla y existe en todas las nubes, también en compatibles con S3 (MinIO, R2).
 - Bien: la escritura condicional resuelve el cerrojo.
 - Mal: depende de la estructura de la carpeta, aunque solo para copiarla. Es la dependencia que el ADR-0001 quería evitar, pero ahora es el uso previsto por el autor, no un rodeo.
-- Mal: la carpeta crece: un XML por envío y por respuesta. Habrá que medirlo y ver si se puede limitar a la cadena y los envíos pendientes.
+- Mal: la carpeta crece unos 7,5 KB por envío. Por eso solo se descargan la cadena y los envíos pendientes.
 
 ### C. Solo la cabeza, en formato propio, en un almacenamiento de objetos
 
