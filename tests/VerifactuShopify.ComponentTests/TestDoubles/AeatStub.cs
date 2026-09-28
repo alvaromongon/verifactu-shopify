@@ -93,17 +93,27 @@ public sealed partial class AeatStub : IDisposable
             RegistroRespuestaConsultaFactuSistemaFacturacion = registros,
             ClavePaginacion = next,
         };
+        // Each registro's SIF is written by hand, as the AEAT sends it, and not with the library's serializer.
+        var sifs = registros.Select(r => r.DatosRegistroFacturacion.SistemaInformatico ?? sistema!).ToList();
+        foreach (var registro in registros)
+        {
+            registro.DatosRegistroFacturacion.SistemaInformatico = null;
+        }
+
         var xml = XDocument.Parse(new XmlParser().GetString(new Envelope { Body = new Body { Registro = respuesta } }, Namespaces.Items));
 
-        // The AEAT sends each registro's SIF, which the library leaves out (mdiago/VeriFactu#292).
+        // Inside DatosRegistroFacturacion, before FechaHoraHusoGenRegistro: the block in the response
+        // namespace and its fields in the SuministroInformacion one.
         XNamespace tikLrrc = Namespaces.NamespaceTikLRRC;
         XNamespace sf = Namespaces.NamespaceSF;
-        foreach (var registro in xml.Descendants(tikLrrc + "RegistroRespuestaConsultaFactuSistemaFacturacion"))
+        var datos = xml.Descendants(tikLrrc + "DatosRegistroFacturacion").ToList();
+        for (var i = 0; i < datos.Count; i++)
         {
-            registro.Add(new XElement(tikLrrc + "SistemaInformatico",
-                new XElement(sf + "NombreRazon", sistema!.NombreRazon), new XElement(sf + "NIF", sistema.NIF),
-                new XElement(sf + "IdSistemaInformatico", sistema.IdSistemaInformatico),
-                new XElement(sf + "Version", sistema.Version), new XElement(sf + "NumeroInstalacion", sistema.NumeroInstalacion)));
+            var sif = sifs[i];
+            datos[i].Element(tikLrrc + "FechaHoraHusoGenRegistro")!.AddBeforeSelf(new XElement(tikLrrc + "SistemaInformatico",
+                new XElement(sf + "NombreRazon", sif.NombreRazon), new XElement(sf + "NIF", sif.NIF),
+                new XElement(sf + "IdSistemaInformatico", sif.IdSistemaInformatico),
+                new XElement(sf + "Version", sif.Version), new XElement(sf + "NumeroInstalacion", sif.NumeroInstalacion)));
         }
 
         return xml.ToString();

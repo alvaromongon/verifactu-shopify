@@ -15,6 +15,6 @@ public class VeriFactuPackageTests
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion.Split('+')[0];
 
-        Assert.Equal("1.0.66", version);
+        Assert.Equal("1.0.67", version);
     }
 }
