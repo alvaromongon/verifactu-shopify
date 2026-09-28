@@ -6,7 +6,7 @@ decisores: Álvaro Montero
 
 # 0002. Estado de la cadena en un almacenamiento de objetos externo
 
-- **Issue**: <pendiente de crear>
+- **Issue**: [#36](https://github.com/alvaromongon/verifactu-shopify/issues/36)
 - **Sustituiría a**: [0001](0001-aeat-fuente-de-verdad-de-la-cadena.md), si se acepta.
 
 ## Contexto y problema
