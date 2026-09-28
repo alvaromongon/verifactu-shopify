@@ -77,6 +77,9 @@ src/VerifactuShopify/
   Shopify/        cliente GraphQL de Shopify y lectura de sus pedidos
   Sync/           una pasada de la sincronización y su configuración
   Program.cs      comandos de la línea de comandos
+docs/
+  decisions/      decisiones de arquitectura (ADR)
+  referencias-aeat.md  fuentes normativas y técnicas de la AEAT
 tests/
   VerifactuShopify.UnitTests/       mismas carpetas que src
   VerifactuShopify.ComponentTests/  mismas carpetas que src, contra servicios simulados
@@ -91,7 +94,8 @@ Cada proyecto de tests replica las carpetas y los namespaces de `src`. Lo compar
 - **Código en inglés**: identificadores y comentarios siguen las convenciones de Microsoft para .NET. Los mensajes para el usuario, este README, las issues y los commits van en español.
 - **Configuración central**: `Directory.Build.props` (analizadores con avisos como errores), `Directory.Packages.props` (versiones de los paquetes; un `PackageReference` nunca lleva `Version`) y `.editorconfig`, que el build aplica.
 - **Dependencias bloqueadas**: los `packages.lock.json` se suben con cada cambio de paquetes, y CI restaura en modo bloqueado.
-- **Un PR por paso**: el plan y las decisiones están en las issues y los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
+- **Un PR por paso**: el plan está en las issues y los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
+- **Decisiones de arquitectura**: se registran como ADR en [`docs/decisions/`](docs/decisions/README.md) y se proponen en un PR. La issue enlaza el ADR, y la revisión del PR es la discusión.
 - **Desarrollo asistido por IA**: se trabaja con Claude Code como asistente de programación. [`CLAUDE.md`](CLAUDE.md) recoge las reglas que sigue en este repositorio.
 
 ## Certificado
@@ -334,7 +338,7 @@ spec:
 
 ## Cadena de registros
 
-Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de esa cadena: antes de enviar o anular, el conector consulta el último registro de su sistema informático en el mes actual y en el anterior, y continúa desde él. Así el despliegue no necesita guardar estado entre ejecuciones (decisión en [#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
+Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de esa cadena: antes de enviar o anular, el conector consulta el último registro de su sistema informático en el mes actual y en el anterior, y continúa desde él. Así el despliegue no necesita guardar estado entre ejecuciones (decisión en [ADR-0001](docs/decisions/0001-aeat-fuente-de-verdad-de-la-cadena.md)).
 
 - **Sin cadena local** (un contenedor recién creado), se carga la de la AEAT. La carpeta de cadenas tiene que estar vacía.
 - **Con cadena local** (desarrollo), solo se comprueba que coincide con la de la AEAT. Si no coincide, no se envía nada. Pasa, por ejemplo, después de enviar desde otra máquina. Si la AEAT tiene razón, basta con mover la carpeta `Blockchains` de los datos locales.
