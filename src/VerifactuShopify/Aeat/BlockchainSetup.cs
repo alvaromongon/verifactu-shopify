@@ -1,16 +1,11 @@
 using System.Globalization;
-using System.Xml.Linq;
 
 using VeriFactu.Blockchain;
 using VeriFactu.Business.Operations;
-using VeriFactu.Common.Exceptions;
 using VeriFactu.Config;
-using VeriFactu.Xml;
 using VeriFactu.Xml.Factu;
 using VeriFactu.Xml.Factu.Consulta;
 using VeriFactu.Xml.Factu.Consulta.Respuesta;
-using VeriFactu.Xml.Factu.Fault;
-using VeriFactu.Xml.Soap;
 
 using PeriodoImputacion = VeriFactu.Xml.Factu.Consulta.PeriodoImputacion;
 
@@ -83,20 +78,13 @@ public static class BlockchainSetup
                 consulta.FiltroConsulta.PeriodoImputacion = period;
                 consulta.FiltroConsulta.ClavePaginacion = next;
                 // The same NIF may invoice from other systems (Shopify POS, for instance), each with its
-                // own chain. The query's SIF filter is no use: VeriFactu 1.0.66 serializes its fields in
-                // the wrong namespace and the AEAT answers 4102 (mdiago/VeriFactu#292). The SIF of each
-                // registro is requested and filtered here instead.
+                // own chain. The SIF of each registro is requested and filtered here instead of with the
+                // query's SIF filter, which would also match the version.
                 consulta.DatosAdicionalesRespuesta = new DatosAdicionalesRespuesta { MostrarSistemaInformatico = "S" };
 
-                var (respuesta, sifs) = Send(consulta);
+                var respuesta = query.GetDocuments(consulta);
                 var page = respuesta.RegistroRespuestaConsultaFactuSistemaFacturacion ?? [];
-                if (page.Length != sifs.Count)
-                {
-                    throw new InvalidOperationException(
-                        $"La AEAT devolvió {page.Length} registros y {sifs.Count} sistemas informáticos: no se puede saber a qué cadena pertenece cada uno.");
-                }
-
-                registros.AddRange(page.Where((_, i) => IsFrom(sistema, sifs[i])));
+                registros.AddRange(page.Where(r => IsFrom(sistema, r.DatosRegistroFacturacion?.SistemaInformatico)));
                 next = respuesta.IndicadorPaginacion == "S" ? respuesta.ClavePaginacion : null;
             }
             while (next is not null);
@@ -105,35 +93,12 @@ public static class BlockchainSetup
         return registros;
     }
 
-    // Same as InvoiceQuery.GetDocuments, but also reading the SIF of each registro: VeriFactu 1.0.66
-    // expects it in the response namespace and the AEAT sends its fields in the SuministroInformacion
-    // one, so the library leaves it empty (mdiago/VeriFactu#292).
-    static (RespuestaConsultaFactuSistemaFacturacion, List<XElement?>) Send(ConsultaFactuSistemaFacturacion consulta)
-    {
-        var xml = new XmlParser().GetBytes(new Envelope { Body = new Body { Registro = consulta } }, Namespaces.Items);
-        var response = InvoiceActionMessage.SendXmlBytes(xml, "?op=ConsultaFactuSistemaFacturacion");
-
-        var registro = Envelope.FromXml(response).Body.Registro;
-        if (registro is Fault fault)
-        {
-            throw new FaultException(fault);
-        }
-
-        XNamespace respuesta = Namespaces.NamespaceTikLRRC;
-        var sifs = XDocument.Parse(response)
-            .Descendants(respuesta + "RegistroRespuestaConsultaFactuSistemaFacturacion")
-            .Select(r => r.Descendants(respuesta + "SistemaInformatico").FirstOrDefault())
-            .ToList();
-        return ((RespuestaConsultaFactuSistemaFacturacion)registro, sifs);
-    }
-
     // A SIF is identified by producer, id and installation number; the version doesn't count.
-    public static bool IsFrom(SistemaInformatico sistema, XElement? sif)
+    public static bool IsFrom(SistemaInformatico sistema, SistemaInformatico? sif)
     {
-        XNamespace sf = Namespaces.NamespaceSF;
-        var nif = sif?.Element(sf + "NIF")?.Value;
-        var id = sif?.Element(sf + "IdSistemaInformatico")?.Value;
-        var instalacion = sif?.Element(sf + "NumeroInstalacion")?.Value;
+        var nif = sif?.NIF;
+        var id = sif?.IdSistemaInformatico;
+        var instalacion = sif?.NumeroInstalacion;
 
         // Without a SIF, dropping the registro would make the chain look empty and start another.
         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(instalacion))
@@ -198,7 +163,7 @@ public static class BlockchainSetup
     static string VarFileName(string blockchainPath, string sellerNif) =>
         Path.Combine(blockchainPath, sellerNif, $"_{sellerNif}.csv");
 
-    // Internal format of VeriFactu 1.0.66 (Blockchain.WriteVar): id;timestamp;hash;date;NIF;number.
+    // Internal format of VeriFactu 1.0.67 (Blockchain.WriteVar): id;timestamp;hash;date;NIF;number.
     // The timestamp uses the process culture, which is the one the library reads it with. The id only
     // numbers the local files; the AEAT never sees it.
     static string VarFileLine(ChainHead head) =>

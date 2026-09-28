@@ -228,7 +228,7 @@
         "dependencies": {
           "Microsoft.Extensions.Configuration.EnvironmentVariables": "[10.0.12, )",
           "Microsoft.Extensions.Configuration.UserSecrets": "[10.0.12, )",
-          "VeriFactu": "[1.0.66, 1.0.66]"
+          "VeriFactu": "[1.0.67, 1.0.67]"
         }
       },
       "Microsoft.Extensions.Configuration.EnvironmentVariables": {
@@ -255,9 +255,9 @@
       },
       "VeriFactu": {
         "type": "CentralTransitive",
-        "requested": "[1.0.66, 1.0.66]",
-        "resolved": "1.0.66",
-        "contentHash": "i1ifAWqLTrVyzRr2lalo7gNZAo1/0UJmR7hZCupd2Yvp6GqkpLUeKl6WeerduRarNoLYx3IqQ62P44Cn8I+LYQ==",
+        "requested": "[1.0.67, 1.0.67]",
+        "resolved": "1.0.67",
+        "contentHash": "kQhcTqOR69aiMzqEyDPO/6TAFqfnfNmtzYKEyxZE+mIzrXGkZByJarGIs7cvwWlct3C/MwnptYwvDeEq9D5wIA==",
         "dependencies": {
           "System.Security.Cryptography.Xml": "10.0.11"
         }
