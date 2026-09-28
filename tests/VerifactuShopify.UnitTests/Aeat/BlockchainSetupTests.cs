@@ -1,5 +1,3 @@
-using System.Xml.Linq;
-
 using VeriFactu.Blockchain;
 using VeriFactu.Business;
 using VeriFactu.Config;
@@ -88,16 +86,8 @@ public sealed class BlockchainSetupTests
         Version = "1.0.0.0",
     };
 
-    // As the AEAT sends it: the block in the response namespace and its fields in the SuministroInformacion one.
-    static XElement Sif(string nif, string id, string instalacion, string version = "0.9.0.0")
-    {
-        XNamespace respuesta = Namespaces.NamespaceTikLRRC;
-        XNamespace sf = Namespaces.NamespaceSF;
-        return new XElement(respuesta + "SistemaInformatico",
-            new XElement(sf + "NombreRazon", "PRODUCTOR"), new XElement(sf + "NIF", nif),
-            new XElement(sf + "IdSistemaInformatico", id), new XElement(sf + "Version", version),
-            new XElement(sf + "NumeroInstalacion", instalacion));
-    }
+    static SistemaInformatico Sif(string nif, string id, string instalacion, string version = "0.9.0.0") =>
+        new() { NombreRazon = "PRODUCTOR", NIF = nif, IdSistemaInformatico = id, Version = version, NumeroInstalacion = instalacion };
 
     [Fact]
     public void A_record_belongs_to_our_chain_whatever_version_produced_it()

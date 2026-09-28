@@ -39,6 +39,25 @@ public sealed class BlockchainSetupTests : IDisposable
     }
 
     [Fact]
+    public void Only_the_records_of_this_system_are_read()
+    {
+        var tpv = Registros.Alta(SellerNif, "TPV-1", "Venta en tienda", "HUELLA-TPV");
+        tpv.DatosRegistroFacturacion.SistemaInformatico = new SistemaInformatico
+        {
+            NIF = Sistema.NIF,
+            NombreRazon = Sistema.NombreRazon,
+            IdSistemaInformatico = Sistema.IdSistemaInformatico,
+            NumeroInstalacion = "tpv",
+            Version = Sistema.Version,
+        };
+        _aeat.GivenRecords(Sistema, Registros.Alta(SellerNif, "PRE-2026-000001", "Pedido #1001 (1): Jamón", "HUELLA-1"), tpv);
+
+        var registros = BlockchainSetup.QueryRecords(SellerNif, "EMISOR DE PRUEBA", Sistema, [BlockchainSetup.Period(Now)]);
+
+        Assert.Equal(["PRE-2026-000001"], registros.Select(r => r.IDFactura.NumSerieFactura));
+    }
+
+    [Fact]
     public void A_soap_fault_stops_the_query()
     {
         _aeat.GivenFault("Codigo[4102].El XML no cumple el esquema.");
