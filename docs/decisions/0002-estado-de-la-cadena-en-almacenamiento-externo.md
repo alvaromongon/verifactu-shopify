@@ -22,7 +22,7 @@ Hay que decidir dónde vive el estado de la cadena. La condición es mantener un
   - Un registro rechazado «no figuraría jamás en los sistemas de la AEAT (aunque constaría un rechazo)».
   - Si el error se corrige sin factura rectificativa, se genera un alta de subsanación con `Subsanacion = S` y `RechazoPrevio = X`, porque el registro original «no existe en la AEAT».
 - **Ningún texto dice de forma expresa** con qué se encadena el registro siguiente a uno rechazado. La lectura literal del art. 7 (encadenar con el último generado) y el tratamiento de la FAQ (el rechazado existió, aunque la AEAT no lo tenga) apoyan la postura del autor.
-- **La propia librería hace lo contrario por defecto.** En la 1.0.67, `InvoiceEntry.Save()` borra el eslabón cuando la respuesta no trae CSV, que es lo que pasa en un rechazo. Solo lo conserva con `Settings.DisableBlockchainDelete = true`.
+- **La propia librería hace lo contrario por defecto.** En la 1.0.67, `InvoiceEntry.Save()` borra el eslabón cuando la respuesta no trae CSV, que es lo que pasa en un rechazo. Solo lo conserva con `Settings.DisableBlockchainDelete = true`. Tras [mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297), el autor ha hecho de `true` el valor por defecto en `main` (2026-09-29): la librería también considera que el rechazado sigue en la cadena.
 
 **Conclusión**: lo más seguro es tratar los registros rechazados como parte de la cadena. Hoy el conector no lo hace. Tras un rechazo, que ya para la ejecución, la siguiente encadenaría con el último registro aceptado.
 
@@ -38,7 +38,7 @@ Programa aislado, con su propia carpeta (`VeriFactuEnvironment.Path`), su propio
 | Alta siguiente | Encadena con el rechazado y la AEAT la acepta como «Correcto», aunque nunca recibió esa huella |
 | Reenvío con `InvoiceRetrySend` | La AEAT recibe el registro original (misma huella, mismo anterior, misma fecha de generación), pero **la librería añade en local un eslabón nuevo** que encadena con el original y nunca se envía |
 
-- **`InvoiceRetrySend` está pensado para el modo por defecto**, en el que el eslabón ya se ha borrado y se vuelve a añadir con la misma huella. Con `DisableBlockchainDelete` deja un eslabón fantasma: el siguiente registro encadenaría con una huella que no corresponde a ningún registro. Los dos mecanismos no se pueden combinar.
+- **`InvoiceRetrySend` está pensado para el modo por defecto**, en el que el eslabón ya se ha borrado y se vuelve a añadir con la misma huella. Con `DisableBlockchainDelete` deja un eslabón fantasma: el siguiente registro encadenaría con una huella que no corresponde a ningún registro. Los dos mecanismos no se pueden combinar en la 1.0.68. El autor lo ha corregido en `main` ([mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297)): `InvoiceRetrySend` solo añade el eslabón si no está ya en la cadena y conserva la huella original. Todavía no está publicado.
 - **Tamaño**: unos 7,5 KB por envío (el XML en `Invoices` y en `Outbox`, y la respuesta en `Inbox`) y unos 380 bytes por eslabón en la cadena. Con 1.000 pedidos al mes, unos 90 MB al año.
 
 ## Factores de decisión
@@ -67,14 +67,14 @@ Cómo sería una ejecución, por emisor:
 1. Adquirir el cerrojo con una escritura condicional en el mismo bucket: `If-None-Match` en S3, o un *lease* en Blob. Esto resuelve también [#16](https://github.com/alvaromongon/verifactu-shopify/issues/16).
 2. Descargar la cadena (`Blockchains`) y los envíos pendientes a un directorio temporal, y apuntar la librería a él con `VeriFactuEnvironment.Path`. Lo ya enviado se queda en el bucket y no se descarga.
 3. Comprobar la cabeza local contra la AEAT, como hace hoy `cadena`. Si la AEAT está un registro por delante y ese registro encadena con la cabeza local, fue un envío aceptado cuyo estado no llegó a subirse. En cualquier otro caso, parar.
-4. Enviar con `DisableBlockchainDelete = true`, para que un rechazo o un envío sin respuesta no saquen el registro de la cadena. Subir los ficheros cambiados tras cada envío.
-5. Si hay un envío pendiente de respuesta, reenviar su XML tal cual (el de `Outbox`) antes de generar otro. No con `InvoiceRetrySend`, que con `DisableBlockchainDelete` añade un eslabón fantasma.
+4. Enviar con `DisableBlockchainDelete = true` (valor por defecto a partir de la versión que publique el arreglo de #297), para que un rechazo o un envío sin respuesta no saquen el registro de la cadena. Subir los ficheros cambiados tras cada envío.
+5. Si hay un envío pendiente de respuesta, reenviarlo con `InvoiceRetrySend` antes de generar otro. Exige la versión que publique el arreglo de [mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297); con la 1.0.68 añade un eslabón fantasma.
 6. Liberar el cerrojo.
 
 **Confianza**: media.
 - Lo que falta confirmar:
   - Que los registros rechazados forman parte de la cadena. Es la lectura más segura, pero no está escrita de forma expresa. Pregunta para el asesor o para la AEAT.
-  - Cómo quiere el autor que se reenvíe con `DisableBlockchainDelete`: si `InvoiceRetrySend` debería no añadir el eslabón cuando ya está en la cadena.
+  - Que la versión con el arreglo de #297 se publique con declaración responsable, y repetir con ella la prueba en preproducción.
 - Lo que haría revisar esta decisión: que la AEAT confirme lo contrario, o que la librería ofrezca otra forma de persistir su estado.
 
 ### Consecuencias
@@ -84,8 +84,7 @@ Cómo sería una ejecución, por emisor:
 - Buena: el mismo bucket da el cerrojo de #16, sin otra pieza.
 - Buena: desaparece el límite de dos meses de consulta ([#22](https://github.com/alvaromongon/verifactu-shopify/issues/22)) y el de anular solo facturas recientes: la cabeza ya no se busca en la AEAT.
 - Mala: el despliegue necesita un bucket, sus credenciales y su copia de seguridad. Perderlo exige recuperar la cabeza de la AEAT, que es el mecanismo actual y queda como plan de emergencia.
-- Mala: exige la 1.0.68, que trae el modo NO VERI\*FACTU y más cambios que revisar.
-- Mala: el reenvío depende de dónde deja la librería el XML enviado (`Outbox`, con sufijo `.ERR` si falló), hasta que `InvoiceRetrySend` funcione con `DisableBlockchainDelete`.
+- Mala: exige una versión de la librería posterior a la 1.0.68, que aún no está publicada, para reenviar con `InvoiceRetrySend`.
 - Mala: hay que abstraer el almacenamiento para no depender de una nube, con al menos dos implementaciones (S3 y Blob) y sus tests.
 - Mala: entre un envío aceptado y la subida hay una ventana en la que el estado del bucket queda por detrás de la AEAT. El paso 3 lo detecta.
 
