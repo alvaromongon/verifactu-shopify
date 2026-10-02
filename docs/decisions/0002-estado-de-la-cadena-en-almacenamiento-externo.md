@@ -1,13 +1,13 @@
 ---
-estado: Propuesto
-fecha: 2026-09-28
+estado: Aceptado
+fecha: 2026-10-02
 decisores: Álvaro Montero
 ---
 
 # 0002. Estado de la cadena en un almacenamiento de objetos externo
 
-- **Issue**: [#36](https://github.com/alvaromongon/verifactu-shopify/issues/36)
-- **Sustituiría a**: [0001](0001-aeat-fuente-de-verdad-de-la-cadena.md), si se acepta.
+- **Issue**: [#36](https://github.com/alvaromongon/verifactu-shopify/issues/36) (análisis); implementación en [#40](https://github.com/alvaromongon/verifactu-shopify/issues/40)
+- **Sustituye a**: [0001](0001-aeat-fuente-de-verdad-de-la-cadena.md)
 
 ## Contexto y problema
 
@@ -61,7 +61,7 @@ Programa aislado, con su propia carpeta (`VeriFactuEnvironment.Path`), su propio
 
 ## Decisión
 
-Opción propuesta: «B, la carpeta de la librería en un almacenamiento de objetos». Es la única que cumple el art. 7 sin escribir ficheros internos de la librería, y es la forma de uso que recomienda el autor. El despliegue sigue sin estado en el host: el estado está en un bucket.
+Opción elegida: «B, la carpeta de la librería en un almacenamiento de objetos». Es la única que cumple el art. 7 sin escribir ficheros internos de la librería, y es la forma de uso que recomienda el autor. El despliegue sigue sin estado en el host: el estado está en un bucket.
 
 Cómo sería una ejecución, por emisor:
 
@@ -74,9 +74,7 @@ Cómo sería una ejecución, por emisor:
 7. Liberar el cerrojo.
 
 **Confianza**: alta. La normativa (art. 7), la FAQ de desarrolladores, el autor de la librería (que cambia su valor por defecto) y el asesor apuntan en la misma dirección, aunque ningún texto lo diga de forma expresa.
-- Lo que falta confirmar:
-  - Que la versión con el arreglo de #297 se publique con declaración responsable, y repetir con ella la prueba en preproducción.
-  - La consulta a la AEAT sobre el encadenamiento tras un rechazo queda como confirmación; no bloquea la decisión.
+- La consulta a la AEAT sobre el encadenamiento tras un rechazo queda como confirmación; no bloqueó la decisión.
 - Lo que haría revisar esta decisión: que la AEAT responda lo contrario, o que la librería ofrezca otra forma de persistir su estado.
 
 ### Consecuencias
@@ -93,6 +91,7 @@ Cómo sería una ejecución, por emisor:
 
 ### Confirmación
 
+- Requisito para implementarlo: una versión de la librería con el arreglo de [mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297) y su declaración responsable, con la que se repite la prueba en preproducción de este ADR antes de empezar.
 - Tests de componente con un almacenamiento de objetos simulado: rechazo, envío sin respuesta, caída entre envío y subida, y cerrojo ocupado.
 - La prueba en preproducción de este ADR, repetida con el conector: un registro rechazado a propósito y un envío sin respuesta, comprobando que el siguiente encadena con cada uno y que no hay eslabones fantasma.
 
