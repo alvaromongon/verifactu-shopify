@@ -23,8 +23,9 @@ Hay que decidir dónde vive el estado de la cadena. La condición es mantener un
   - Si el error se corrige sin factura rectificativa, se genera un alta de subsanación con `Subsanacion = S` y `RechazoPrevio = X`, porque el registro original «no existe en la AEAT».
 - **Ningún texto dice de forma expresa** con qué se encadena el registro siguiente a uno rechazado. La lectura literal del art. 7 (encadenar con el último generado) y el tratamiento de la FAQ (el rechazado existió, aunque la AEAT no lo tenga) apoyan la postura del autor.
 - **La propia librería hace lo contrario por defecto.** En la 1.0.67, `InvoiceEntry.Save()` borra el eslabón cuando la respuesta no trae CSV, que es lo que pasa en un rechazo. Solo lo conserva con `Settings.DisableBlockchainDelete = true`. Tras [mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297), el autor ha hecho de `true` el valor por defecto en `main` (2026-09-29): la librería también considera que el rechazado sigue en la cadena.
+- **El asesor fiscal (2026-10-01)**: cuando la AEAT rechaza un registro, hay que subsanar los errores y reenviar el registro corregido; no se hace una factura nueva. Coincide con la FAQ (alta de subsanación con `RechazoPrevio = X`). No se pronuncia sobre el encadenamiento, que es una cuestión técnica.
 
-**Conclusión**: lo más seguro es tratar los registros rechazados como parte de la cadena. Hoy el conector no lo hace. Tras un rechazo, que ya para la ejecución, la siguiente encadenaría con el último registro aceptado.
+**Conclusión**: lo más seguro es tratar los registros rechazados como parte de la cadena. Hoy el conector no lo hace. Tras un rechazo, que ya para la ejecución, la siguiente encadenaría con el último registro aceptado. Y la factura rechazada no se vuelve a enviar como nueva: se corrige con un alta de subsanación.
 
 ## Prueba con la 1.0.68 en preproducción (2026-09-28)
 
@@ -69,13 +70,14 @@ Cómo sería una ejecución, por emisor:
 3. Comprobar la cabeza local contra la AEAT, como hace hoy `cadena`. Si la AEAT está un registro por delante y ese registro encadena con la cabeza local, fue un envío aceptado cuyo estado no llegó a subirse. En cualquier otro caso, parar.
 4. Enviar con `DisableBlockchainDelete = true` (valor por defecto a partir de la versión que publique el arreglo de #297), para que un rechazo o un envío sin respuesta no saquen el registro de la cadena. Subir los ficheros cambiados tras cada envío.
 5. Si hay un envío pendiente de respuesta, reenviarlo con `InvoiceRetrySend` antes de generar otro. Exige la versión que publique el arreglo de [mdiago/VeriFactu#297](https://github.com/mdiago/VeriFactu/issues/297); con la 1.0.68 añade un eslabón fantasma.
-6. Liberar el cerrojo.
+6. Tras un rechazo, parar y avisar, como hoy. La factura se corrige con un alta de subsanación (`Subsanacion = S`, `RechazoPrevio = X`), que se encadena como cualquier otro registro. Cómo se genera (a mano o desde el conector) queda para su propia issue.
+7. Liberar el cerrojo.
 
-**Confianza**: media.
+**Confianza**: alta. La normativa (art. 7), la FAQ de desarrolladores, el autor de la librería (que cambia su valor por defecto) y el asesor apuntan en la misma dirección, aunque ningún texto lo diga de forma expresa.
 - Lo que falta confirmar:
-  - Que los registros rechazados forman parte de la cadena. Es la lectura más segura, pero no está escrita de forma expresa. Pregunta para el asesor o para la AEAT.
   - Que la versión con el arreglo de #297 se publique con declaración responsable, y repetir con ella la prueba en preproducción.
-- Lo que haría revisar esta decisión: que la AEAT confirme lo contrario, o que la librería ofrezca otra forma de persistir su estado.
+  - La consulta a la AEAT sobre el encadenamiento tras un rechazo queda como confirmación; no bloquea la decisión.
+- Lo que haría revisar esta decisión: que la AEAT responda lo contrario, o que la librería ofrezca otra forma de persistir su estado.
 
 ### Consecuencias
 
@@ -85,6 +87,7 @@ Cómo sería una ejecución, por emisor:
 - Buena: desaparece el límite de dos meses de consulta ([#22](https://github.com/alvaromongon/verifactu-shopify/issues/22)) y el de anular solo facturas recientes: la cabeza ya no se busca en la AEAT.
 - Mala: el despliegue necesita un bucket, sus credenciales y su copia de seguridad. Perderlo exige recuperar la cabeza de la AEAT, que es el mecanismo actual y queda como plan de emergencia.
 - Mala: exige una versión de la librería posterior a la 1.0.68, que aún no está publicada, para reenviar con `InvoiceRetrySend`.
+- Mala: un rechazo exige generar un alta de subsanación con `RechazoPrevio = X`, que el conector todavía no sabe hacer.
 - Mala: hay que abstraer el almacenamiento para no depender de una nube, con al menos dos implementaciones (S3 y Blob) y sus tests.
 - Mala: entre un envío aceptado y la subida hay una ventana en la que el estado del bucket queda por detrás de la AEAT. El paso 3 lo detecta.
 
