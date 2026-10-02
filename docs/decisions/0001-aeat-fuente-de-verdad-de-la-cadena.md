@@ -1,6 +1,6 @@
 ---
-estado: Aceptado
-fecha: 2026-09-22
+estado: Sustituido por [0002](0002-estado-de-la-cadena-en-almacenamiento-externo.md)
+fecha: 2026-10-02
 decisores: Álvaro Montero
 ---
 

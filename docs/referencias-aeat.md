@@ -43,6 +43,15 @@ curl -sL <url> | shasum -a 256
 - **El SIF se identifica por el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`**, y ese número no puede repetirse nunca (FAQ de desarrolladores, apartado 4). Reinstalar es crear otro SIF. En un despliegue sin estado, el número tiene que venir de la configuración: la librería usa la MAC si no se indica, y la MAC de un contenedor cambia en cada ejecución.
 - La fecha y hora de generación son las del territorio desde el que se expide la factura, con su huso horario (art. 7.e y 7.g).
 
+## Registros rechazados
+
+Consultado el 28-09-2026 ([ADR-0002](decisions/0002-estado-de-la-cadena-en-almacenamiento-externo.md)).
+
+- **La cadena se define sobre los registros generados.** Cada registro lleva los datos del «inmediatamente anterior por orden cronológico» (Orden, art. 7.a), y la comprobación previa a generar uno nuevo mira «el último registro de facturación generado» (art. 7.i).
+- **Un registro rechazado no queda en la AEAT.** La FAQ de desarrolladores, en el apartado sobre rectificaciones, anulaciones y subsanaciones, dice que un registro rechazado «no figuraría jamás en los sistemas de la AEAT (aunque constaría un rechazo)».
+- **Se corrige con un alta de subsanación** que lleva `Subsanacion = S` y `RechazoPrevio = X`, porque el original «no existe en la AEAT». Es la operación «Alta por rechazo» del Excel de diseños de registro.
+- **Ningún texto dice expresamente** con qué registro se encadena el siguiente a uno rechazado. La lectura literal del art. 7 es que se encadena con el rechazado, que es el último generado.
+
 ## Qué valida la AEAT al recibir un registro
 
 Según el documento de validaciones, la AEAT **no rechaza** un registro mal encadenado:
