@@ -78,6 +78,7 @@ src/VerifactuShopify/
   Sync/           una pasada de la sincronización y su configuración
   Program.cs      comandos de la línea de comandos
 docs/
+  agents/         ciclo de las issues con agentes
   decisions/      decisiones de arquitectura (ADR)
   referencias-aeat.md  fuentes normativas y técnicas de la AEAT
 tests/
@@ -96,7 +97,7 @@ Cada proyecto de tests replica las carpetas y los namespaces de `src`. Lo compar
 - **Dependencias bloqueadas**: los `packages.lock.json` se suben con cada cambio de paquetes, y CI restaura en modo bloqueado.
 - **Un PR por paso**: el plan está en las issues y los [milestones](https://github.com/alvaromongon/verifactu-shopify/milestones).
 - **Decisiones de arquitectura**: se registran como ADR en [`docs/decisions/`](docs/decisions/README.md) y se proponen en un PR. La issue enlaza el ADR, y la revisión del PR es la discusión.
-- **Desarrollo asistido por IA**: se trabaja con Claude Code como asistente de programación. [`CLAUDE.md`](CLAUDE.md) recoge las reglas que sigue en este repositorio.
+- **Desarrollo asistido por IA**: se trabaja con Claude Code como asistente de programación. [`CLAUDE.md`](CLAUDE.md) recoge las reglas que sigue en este repositorio, y [`docs/agents/workflow.md`](docs/agents/workflow.md) explica el ciclo de las issues: labels, clasificación, refinado, implementación y revisión.
 
 ## Certificado
 
