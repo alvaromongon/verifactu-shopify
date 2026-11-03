@@ -5,7 +5,8 @@ read the relevant sections before working and keep them up to date; do not dupli
 
 - Project: .NET 10 console connector that turns paid Shopify orders into VERI\*FACTU records and
   sends them to the AEAT through `mdiago/VeriFactu`, run as a stateless scheduled job.
-- Plan: GitHub issues and milestones. Read the issue before implementing.
+- Plan: GitHub issues and milestones. Read the issue before implementing. The issue cycle (labels,
+  triage, refine, implement, review, escalation) is in [`docs/agents/workflow.md`](docs/agents/workflow.md).
 - Decisions: ADRs in `docs/decisions/` (`adr` skill). An issue that needs a design gets an ADR proposed
   in a PR, with the options analysed; read the accepted ADRs that affect a change before making it.
 

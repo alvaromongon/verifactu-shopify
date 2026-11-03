@@ -1,0 +1,22 @@
+name: Propuesta
+description: Proponer una capacidad nueva o un cambio de comportamiento.
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: Qué intentas hacer y por qué el comportamiento actual no basta.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Comportamiento deseado
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: ¿Cómo sabrías que está resuelto?
+      description: Opcional. Resultados concretos y comprobables; se convierten en criterios de aceptación.
