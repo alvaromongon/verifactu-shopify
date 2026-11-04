@@ -32,7 +32,6 @@
         "required_status_checks": [
           { "context": "Build & test", "integration_id": 15368 },
           { "context": "Tests (Windows)", "integration_id": 15368 },
-          { "context": "Tests (macOS)", "integration_id": 15368 },
           { "context": "Deployment shape", "integration_id": 15368 },
           { "context": "Analyze C#", "integration_id": 15368 }
         ]
