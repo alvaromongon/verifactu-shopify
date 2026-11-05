@@ -114,6 +114,12 @@ public static class BlockchainSetup
     // to set the head, its internal file is written (proposed in mdiago/VeriFactu#293).
     public static void Load(string sellerNif, ChainHead? head)
     {
+        // The AEAT never gets a rejected registro, nor perhaps one sent without an answer: the local chain
+        // drops it too, so that it stays at the AEAT head. VeriFactu keeps it by default since 1.0.69,
+        // and a Settings.xml from an older version may say either. ADR-0002 keeps it, once the chain
+        // folder is persisted (#40).
+        Settings.Current.DisableBlockchainDelete = false;
+
         var blockchainPath = Settings.Current.BlockchainPath;
         var varFile = VarFileName(blockchainPath, sellerNif);
 
@@ -163,7 +169,8 @@ public static class BlockchainSetup
     static string VarFileName(string blockchainPath, string sellerNif) =>
         Path.Combine(blockchainPath, sellerNif, $"_{sellerNif}.csv");
 
-    // Internal format of VeriFactu 1.0.67 (Blockchain.WriteVar): id;timestamp;hash;date;NIF;number.
+    // Internal format of VeriFactu 1.0.69 (Blockchain.GetVarFileLine, unchanged since 1.0.67):
+    // id;timestamp;hash;date;NIF;number.
     // The timestamp uses the process culture, which is the one the library reads it with. The id only
     // numbers the local files; the AEAT never sees it.
     static string VarFileLine(ChainHead head) =>

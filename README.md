@@ -33,7 +33,7 @@ Nada de lo que hay aquí es asesoramiento fiscal. Consulta con tu asesor antes d
 
 ## Dependencia: mdiago/VeriFactu
 
-- **Versión fijada: 1.0.67.** Solo se usan versiones para las que el autor ha publicado declaración responsable ([listado](https://github.com/mdiago/VeriFactu/tree/main/NetFramework/Doc/Legal)). Antes de subir de versión hay que comprobar que existe la de la nueva; un test lo recuerda.
+- **Versión fijada: 1.0.69.** Solo se usan versiones para las que el autor ha publicado declaración responsable ([listado](https://github.com/mdiago/VeriFactu/tree/main/NetFramework/Doc/Legal)). Antes de subir de versión hay que comprobar que existe la de la nueva; un test lo recuerda.
 - **Licencia: AGPL-3.0 con una cláusula adicional de Irene Solutions SL**, que exige comprar licencia comercial si la librería se usa en una actividad comercial sin publicar el código fuente (por ejemplo, un servicio de pago o un producto cerrado). Está en la cabecera de sus ficheros; léela antes de usar este conector con fines comerciales.
 
 ## Alcance previsto
@@ -343,6 +343,7 @@ Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de es
 
 - **Sin cadena local** (un contenedor recién creado), se carga la de la AEAT. La carpeta de cadenas tiene que estar vacía.
 - **Con cadena local** (desarrollo), solo se comprueba que coincide con la de la AEAT. Si no coincide, no se envía nada. Pasa, por ejemplo, después de enviar desde otra máquina. Si la AEAT tiene razón, basta con mover la carpeta `Blockchains` de los datos locales.
+- **Un registro rechazado o sin respuesta sale de la cadena local**: la cadena local tiene que seguir a la de la AEAT, que no tiene el rechazado y puede no tener el que quedó sin respuesta (la siguiente ejecución lo comprueba). El conector lo fija así aunque la librería los conserve por defecto desde la 1.0.69. Los conservará cuando la cadena se guarde fuera del contenedor ([ADR-0002](docs/decisions/0002-estado-de-la-cadena-en-almacenamiento-externo.md), [#40](https://github.com/alvaromongon/verifactu-shopify/issues/40)).
 - **El mismo NIF puede facturar desde otros sistemas**, como el TPV de Shopify, y cada uno tiene su propia cadena. El conector solo mira los registros de su sistema: el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`. Por eso el número de instalación tiene que ser fijo y no repetirse nunca.
 - **Si el último registro tiene más de un mes, hoy no se encuentra**: el siguiente saldría como primer registro y la cadena quedaría rota. Pasa si la tienda pasa más de un mes sin ventas o el conector está parado. Pendiente en [#22](https://github.com/alvaromongon/verifactu-shopify/issues/22).
 - **Solo se anulan facturas del mes actual o del anterior**, que son los dos meses que se consultan. Lo más antiguo se corrige con una rectificativa.
@@ -350,7 +351,7 @@ Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de es
 
 ## Datos locales de VeriFactu
 
-La librería guarda su configuración, la cadena de bloques y los registros en una carpeta fija que no se puede cambiar, y la crea en cuanto se usa:
+La librería guarda su configuración, la cadena de bloques y los registros en una carpeta fija, y la crea en cuanto se usa. Desde la 1.0.68 se puede cambiar con `VeriFactuEnvironment.Path`, pero el conector todavía no lo usa ([#40](https://github.com/alvaromongon/verifactu-shopify/issues/40)):
 
 | Sistema | Carpeta |
 |---|---|

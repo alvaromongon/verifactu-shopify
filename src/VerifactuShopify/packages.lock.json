@@ -26,9 +26,9 @@
       },
       "VeriFactu": {
         "type": "Direct",
-        "requested": "[1.0.67, 1.0.67]",
-        "resolved": "1.0.67",
-        "contentHash": "kQhcTqOR69aiMzqEyDPO/6TAFqfnfNmtzYKEyxZE+mIzrXGkZByJarGIs7cvwWlct3C/MwnptYwvDeEq9D5wIA==",
+        "requested": "[1.0.69, 1.0.69]",
+        "resolved": "1.0.69",
+        "contentHash": "bWfvANdc+Ey6JGySeH6kbhkY/YJj8UraP3nCr8xgD1CYl0BckwteOosTgEzZEwt1AYWT8p6SDONPgYMsi+tnRQ==",
         "dependencies": {
           "System.Security.Cryptography.Xml": "10.0.11"
         }

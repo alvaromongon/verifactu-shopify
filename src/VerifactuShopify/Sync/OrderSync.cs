@@ -94,8 +94,9 @@ public static class OrderSync
             }
             catch
             {
-                // The library drops the registro from the chain. Whether the AEAT got it or not, the
-                // next run reads it from there and either skips this order or sends it again.
+                // The library drops the registro from the chain (BlockchainSetup.Load). Whether the AEAT
+                // got it or not, the next run reads it from there and either skips this order or sends it
+                // again.
                 Console.WriteLine($"{label}: {invoice.InvoiceID} sin respuesta de la AEAT.");
                 throw;
             }

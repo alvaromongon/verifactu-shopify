@@ -117,6 +117,36 @@ public sealed class OrderSyncTests : IDisposable
         Assert.Single(_aeat.Altas());
     }
 
+    // The head is read from the AEAT (ADR-0001), which never got the rejected registro: if the local
+    // chain kept it, the next run on the same folder would find the two heads apart and stop.
+    [Fact]
+    public async Task A_rejected_registro_leaves_the_local_chain_at_the_aeat_head()
+    {
+        const string SellerNif = "00000013J";
+        _aeat.GivenAltasRejected("1100", "Valor o tipo incorrecto del campo");
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt))
+            .GivenOrder("1", Orders.Json("1", "#1001"));
+
+        var exitCode = await RunAsync(SellerNif);
+
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Null(VeriFactu.Blockchain.Blockchain.Get(SellerNif).Current);
+    }
+
+    [Fact]
+    public async Task A_registro_sent_without_an_answer_leaves_the_local_chain_at_the_aeat_head()
+    {
+        const string SellerNif = "00000014Z";
+        _aeat.GivenAltasFail();
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt))
+            .GivenOrder("1", Orders.Json("1", "#1001"));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(SellerNif));
+
+        Assert.Single(_aeat.Altas());
+        Assert.Null(VeriFactu.Blockchain.Blockchain.Get(SellerNif).Current);
+    }
+
     [Fact]
     public async Task Orders_within_the_margin_wait_for_the_next_run()
     {
