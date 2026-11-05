@@ -10,22 +10,23 @@ de `claude-config`). Una issue `spec` recoge el qué y el porqué. Su milestone 
 0. **Dar forma** (`github-shape`): una idea del propietario se convierte en una issue `spec` (problema, por qué importa, métrica de éxito, presupuesto de tiempo, opciones y lo que no se hace). Cada pregunta abierta es una issue `decision` que la bloquea. Se salta cuando el trabajo ya está acotado. Al cerrar el milestone se cierra la spec, comprobando la métrica contra su objetivo.
 1. **Clasificar** (`github-triage`): las issues externas entran con `needs-triage` y se clasifican como `needs-info`, `ready-for-agent` o `ready-for-human`, o se cierran como `wontfix`. Los PR externos se revisan como texto: nunca se descargan ni se ejecutan en el equipo.
 2. **Refinar** (`github-refine`): una spec con métrica de éxito se divide en issues *tracer bullet* con sus bloqueos. Solo se detalla la frontera, que se etiqueta `ready-for-agent` o `ready-for-human`. El resto de tickets quedan como esbozos y se detallan cuando llegan a la frontera.
-3. **Implementar** (`github-implement`): una issue `ready-for-agent` cada vez, con TDD y en un subagente aislado. Termina en un commit local en una rama `issue-*`: el push y el PR esperan la confirmación del propietario (ver *Autonomía*).
+3. **Implementar** (`github-implement`): una issue `ready-for-agent` cada vez, con TDD y en un subagente aislado. Termina con una rama `issue-*` pusheada y un PR abierto.
 4. **Revisar**: dos subagentes revisan la rama en paralelo, cada uno en su worktree y solo informando: `code-review` (corrección) y `security-review` (seguridad). Si alguno encuentra algo bloqueante, se hace una ronda de arreglos.
-
-La cola de trabajo (`github-work-queue`) no se usa en este repositorio, porque necesita hacer push sin preguntar.
+5. **Cola de trabajo** (`github-work-queue`): encadena los pasos 3 y 4 sobre las issues `ready-for-agent`, una detrás de otra. Espera a la CI, hace el merge y escala a una persona las issues que lo necesiten (ver *Cuándo se para y escala a una persona*) sin parar el resto de la cola.
 
 ## Autonomía
 
 Por issue, con labels:
 
 - `ready-for-agent`: el agente puede implementarla sin pedir permiso en cada paso.
-- `ready-for-human`: necesita supervisión, criterio humano o una prueba manual.
+- `ready-for-human`: necesita supervisión, criterio humano o una prueba manual. La cola de trabajo se la salta.
 
 Por repositorio:
 
-- **Unattended merge**: no. El propietario hace el merge de cada PR.
-- **Política de push**: supervisada. Se pregunta antes de cada `git push` (ver [`CLAUDE.md`](../../CLAUDE.md), que `.claude/settings.json` aplica con una regla `ask`).
+- **Unattended merge**: yes. La cola de trabajo hace el merge (squash) cuando las dos revisiones están limpias y la CI en verde. La etiqueta `ready-for-agent` es el acuerdo previo sobre qué hacer: la pone el propietario cuando la issue tiene su brief. Fuera de la cola, el merge lo hace el propietario.
+  Por qué `yes` aquí: un merge a `main` no llega a ningún despliegue, porque todavía no hay imagen ni publicación ([#23](https://github.com/alvaromongon/verifactu-shopify/issues/23)). `main` está protegida y exige la CI en verde. Se revisa cuando #23 publique una imagen desde `main`.
+- **Política de push**: los agentes pueden hacer push de ramas `issue-*` y abrir PR; cualquier otro push se pregunta (ver [`CLAUDE.md`](../../CLAUDE.md) › *Push and merge policy*, que aplica `.claude/settings.json`).
+- **AEAT**: ningún agente lanza nada contra la AEAT, ni siquiera contra preproducción, sin que el propietario lo pida en ese momento. Una issue que necesita una prueba en preproducción es `ready-for-human`.
 
 ## Entrada de issues
 
@@ -47,5 +48,4 @@ El agente deja la rama como está, etiqueta la issue `ready-for-human` y explica
 
 ## Diferencias con el flujo por defecto
 
-- Política supervisada: sin cola de trabajo y sin merge desatendido (ver *Autonomía*).
 - Documento en español, como el resto de la documentación del repositorio. Los nombres de las labels se mantienen en inglés.
