@@ -37,7 +37,14 @@ read the relevant sections before working and keep them up to date; do not dupli
   in Spanish. ADR headings and statuses are the Spanish translation of MADR used in `docs/decisions/`:
   *Propuesto*, *Aceptado*, *Rechazado*, *Obsoleto*, *Sustituido por NNNN*.
 - Commits are authored by the repository owner: no `Co-Authored-By` trailers.
-- **Only `git push` after an explicit confirmation from the owner** for that push.
+- Push and merge: see *Push and merge policy* below.
+
+## Push and merge policy
+
+Agents may push `issue-*` branches and open PRs. The work queue (`/github-work-queue`) may merge
+a PR with `gh pr merge --squash` once both reviews are clean and CI is green
+([Unattended merge](docs/agents/workflow.md#autonomía)). Outside the work queue, merging is done by
+the owner. Ask before any other push; never merge with `--admin`.
 
 ## Overrides of the personal baseline
 

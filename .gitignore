@@ -21,3 +21,6 @@ shopify.app.*.toml
 
 # Build and test outputs
 artifacts/
+
+# Review worktrees of the work queue
+.claude/worktrees/
