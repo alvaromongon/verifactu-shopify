@@ -75,6 +75,7 @@ src/VerifactuShopify/
   Configuration/  lectura de la configuración y cultura del proceso
   Invoicing/      regla de facturación, serie y mapeo de pedido a factura
   Shopify/        cliente GraphQL de Shopify y lectura de sus pedidos
+  Storage/        almacenamiento de objetos (S3 y compatibles) con escrituras condicionales; aún sin usar
   Sync/           una pasada de la sincronización y su configuración
   Program.cs      comandos de la línea de comandos
 docs/

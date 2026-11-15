@@ -24,6 +24,11 @@
           "xunit.v3.core.mtp-v2": "[4.0.1]"
         }
       },
+      "AWSSDK.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.103",
+        "contentHash": "DCOotOZU/uuGTJHyhdzDaISArck4hYC6Y9OzZM8/PI+G4AhtNaD1hszFG1Giwdpod0Sn7gxxlx6xUfcPKNeQ8Q=="
+      },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
         "resolved": "2.23.0",
@@ -213,9 +218,19 @@
       "verifactushopify": {
         "type": "Project",
         "dependencies": {
+          "AWSSDK.S3": "[4.0.104.12, )",
           "Microsoft.Extensions.Configuration.EnvironmentVariables": "[10.0.12, )",
           "Microsoft.Extensions.Configuration.UserSecrets": "[10.0.12, )",
           "VeriFactu": "[1.0.69, 1.0.69]"
+        }
+      },
+      "AWSSDK.S3": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.104.12, )",
+        "resolved": "4.0.104.12",
+        "contentHash": "z4rPjjQoPDuWtxk2utbO/I+xNEqA+ac7/cDjwd4KvFrYHfwatJ1IVwjQ7ukaSlSnqY5e9+Q6YHtu87LBJNj+SQ==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.103, 5.0.0)"
         }
       },
       "Microsoft.Extensions.Configuration.EnvironmentVariables": {

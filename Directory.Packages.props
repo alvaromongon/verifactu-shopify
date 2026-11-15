@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup Label="Application">
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.12" />
     <!-- Exact version: only versions whose author published a responsible declaration (see README). -->
@@ -20,6 +21,9 @@
   </ItemGroup>
 
   <ItemGroup Label="Testing">
+    <!-- WireMock.Net depends on 2.3.0, which has a known vulnerability (GHSA-6527-9fp8-r4x6, fixed in a
+         later 2.3.x). Drop this pin once WireMock.Net requires a patched one. -->
+    <PackageVersion Include="Microsoft.AspNetCore.WebUtilities" Version="2.3.14" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
     <PackageVersion Include="WireMock.Net" Version="2.18.0" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.1" />
