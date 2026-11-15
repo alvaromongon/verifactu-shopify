@@ -35,7 +35,7 @@ public sealed class S3Stub : IDisposable
         [.. _server.LogEntries.Select(entry => (
             entry.RequestMessage!.Method,
             entry.RequestMessage.Path,
-            (IReadOnlyDictionary<string, string>)(entry.RequestMessage.Headers ?? new Dictionary<string, WireMock.Types.WireMockList<string>>())
+            (entry.RequestMessage.Headers ?? new Dictionary<string, WireMock.Types.WireMockList<string>>())
                 .ToDictionary(header => header.Key, header => header.Value[0], StringComparer.OrdinalIgnoreCase)))];
 
     // Every response from now on is this S3 error instead (until the stub is disposed): an outage, a
