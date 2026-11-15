@@ -38,7 +38,8 @@ public sealed class S3Stub : IDisposable
             (IReadOnlyDictionary<string, string>)(entry.RequestMessage.Headers ?? new Dictionary<string, WireMock.Types.WireMockList<string>>())
                 .ToDictionary(header => header.Key, header => header.Value[0], StringComparer.OrdinalIgnoreCase)))];
 
-    // The next response is an S3 error instead: an outage or a refused credential.
+    // Every response from now on is this S3 error instead (until the stub is disposed): an outage, a
+    // refused credential or a missing bucket.
     public S3Stub FailWith(int status, string code)
     {
         lock (_gate)
@@ -50,6 +51,31 @@ public sealed class S3Stub : IDisposable
     }
 
     (int Status, string Code)? _failure;
+
+    // Listings come back in reverse key order, as a provider that does not sort would.
+    public S3Stub ListInReverseOrder()
+    {
+        lock (_gate)
+        {
+            _reverseListing = true;
+        }
+
+        return this;
+    }
+
+    // Listings claim to be truncated but give no continuation token, as a broken provider would.
+    public S3Stub ListTruncatedWithoutToken()
+    {
+        lock (_gate)
+        {
+            _truncatedWithoutToken = true;
+        }
+
+        return this;
+    }
+
+    bool _reverseListing;
+    bool _truncatedWithoutToken;
 
     public void Dispose() => _server.Dispose();
 
@@ -126,12 +152,16 @@ public sealed class S3Stub : IDisposable
             .Where(key => after is null || string.CompareOrdinal(key, after) > 0)
             .ToList();
         var page = matching.Take(PageSize).ToList();
-        var truncated = matching.Count > page.Count;
+        var truncated = matching.Count > page.Count || _truncatedWithoutToken;
+        if (_reverseListing)
+        {
+            page.Reverse();
+        }
 
         var xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
             .Append("<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">")
             .Append(ListHeader(page.Count, truncated));
-        if (truncated)
+        if (truncated && !_truncatedWithoutToken)
         {
             xml.Append("<NextContinuationToken>").Append(SecurityElement.Escape(page[^1])).Append("</NextContinuationToken>");
         }

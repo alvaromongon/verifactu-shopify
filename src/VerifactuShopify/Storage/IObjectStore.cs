@@ -5,7 +5,10 @@ public sealed record StoredObject(ReadOnlyMemory<byte> Content, string ETag);
 
 /// <summary>
 /// Result of a conditional write. A failed condition is an expected outcome (somebody else got there
-/// first), not an error: network and credential failures are reported as exceptions instead.
+/// first), not an error: network and credential failures are reported as exceptions instead. A conditional
+/// write that fails with an exception is ambiguous (it may or may not have been applied, for instance when
+/// the response was lost): the caller must read the object back before assuming either, because the
+/// implementations never retry it on their own.
 /// </summary>
 public readonly record struct WriteOutcome(bool Written, string? ETag)
 {

@@ -114,6 +114,70 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
     }
 
     [Fact]
+    public async Task A_missing_bucket_on_a_read_is_an_error_not_a_missing_object()
+    {
+        _s3.FailWith(404, "NoSuchBucket");
+
+        await Assert.ThrowsAsync<AmazonS3Exception>(() => Store.GetAsync("one.txt", Ct));
+    }
+
+    [Fact]
+    public async Task A_missing_bucket_on_a_conditional_write_is_an_error_not_a_condition_not_met()
+    {
+        _s3.FailWith(404, "NoSuchBucket");
+
+        var error = await Assert.ThrowsAsync<AmazonS3Exception>(() => Store.PutIfUnchangedAsync("lock", Bytes("v"), "\"abc\"", Ct));
+
+        Assert.Equal("NoSuchBucket", error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_conditional_write_is_not_retried_by_the_sdk_so_a_lost_response_is_never_replayed()
+    {
+        var store = S3ObjectStore.Create(
+            new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true),
+            new BasicAWSCredentials("test-access-key", "test-secret-key"));
+        _s3.FailWith(503, "ServiceUnavailable");
+
+        await Assert.ThrowsAsync<AmazonS3Exception>(() => store.PutIfAbsentAsync("lock", Bytes("v"), Ct));
+
+        Assert.Single(_s3.Requests, request => request.Method == "PUT");
+    }
+
+    [Fact]
+    public async Task An_empty_region_is_treated_as_unset()
+    {
+        var options = new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, Region: "", ForcePathStyle: true);
+        var store = S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"));
+
+        await store.PutAsync("one.txt", Bytes("x"), Ct);
+
+        var put = Assert.Single(_s3.Requests, request => request.Method == "PUT");
+        Assert.Contains("/us-east-1/s3/", put.Headers["Authorization"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_listing_is_returned_in_ordinal_order_whatever_the_provider_sends()
+    {
+        await Store.PutAsync("b.txt", Bytes("x"), Ct);
+        await Store.PutAsync("a.txt", Bytes("x"), Ct);
+        _s3.ListInReverseOrder();
+
+        var keys = await Store.ListAsync(string.Empty, Ct);
+
+        Assert.Equal(["a.txt", "b.txt"], keys);
+    }
+
+    [Fact]
+    public async Task A_truncated_listing_without_a_continuation_token_is_an_error()
+    {
+        await Store.PutAsync("a.txt", Bytes("x"), Ct);
+        _s3.ListTruncatedWithoutToken();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Store.ListAsync(string.Empty, Ct));
+    }
+
+    [Fact]
     public void Options_are_required()
     {
         Assert.Throws<ArgumentNullException>(() => S3ObjectStore.Create(null!));

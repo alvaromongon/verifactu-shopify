@@ -18,8 +18,16 @@ public sealed record S3ObjectStoreOptions(string Bucket, string? ServiceUrl = nu
 /// <see cref="IObjectStore"/> on S3 and compatible providers. The conditions travel as the standard
 /// <c>If-None-Match</c> and <c>If-Match</c> headers, so the same code works wherever they are honoured.
 /// </summary>
-public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStore
+/// <remarks>
+/// Conditional writes go through <c>conditionalClient</c>, which must not retry: when a write succeeded but
+/// its response was lost, a retry would be answered with 412 and reported as <see cref="WriteOutcome.ConditionNotMet"/>
+/// although this caller wrote the object. Without retries that case surfaces as an exception, an ambiguous
+/// result the caller (the lock) has to resolve by reading the object back.
+/// </remarks>
+public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? conditionalClient = null) : IObjectStore
 {
+    readonly IAmazonS3 _conditionalClient = conditionalClient ?? client;
+
     /// <summary>
     /// Builds a store. Without <paramref name="credentials"/> it uses the SDK's default chain
     /// (environment, profile, role...), which is what a deployment does.
@@ -28,6 +36,18 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        var config = NewConfig(options);
+        var conditionalConfig = NewConfig(options);
+        conditionalConfig.MaxErrorRetry = 0;
+
+        return new S3ObjectStore(NewClient(credentials, config), options.Bucket, NewClient(credentials, conditionalConfig));
+    }
+
+    static AmazonS3Client NewClient(AWSCredentials? credentials, AmazonS3Config config) =>
+        credentials is null ? new AmazonS3Client(config) : new AmazonS3Client(credentials, config);
+
+    static AmazonS3Config NewConfig(S3ObjectStoreOptions options)
+    {
         var config = new AmazonS3Config
         {
             ForcePathStyle = options.ForcePathStyle,
@@ -40,14 +60,14 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
         {
             config.ServiceURL = serviceUrl;
             // A custom endpoint has no region to resolve: sign for the one given, or a neutral one.
-            config.AuthenticationRegion = options.Region ?? "us-east-1";
+            config.AuthenticationRegion = options.Region is { Length: > 0 } signingRegion ? signingRegion : "us-east-1";
         }
         else if (options.Region is { Length: > 0 } region)
         {
             config.RegionEndpoint = RegionEndpoint.GetBySystemName(region);
         }
 
-        return new S3ObjectStore(credentials is null ? new AmazonS3Client(config) : new AmazonS3Client(credentials, config), options.Bucket);
+        return config;
     }
 
     public async Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default)
@@ -59,15 +79,16 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
             await response.ResponseStream.CopyToAsync(content, cancellationToken);
             return new StoredObject(content.ToArray(), response.ETag);
         }
-        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound)
+        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode == "NoSuchKey")
         {
+            // Only a missing key: a missing bucket (NoSuchBucket) is a configuration error and must surface.
             return null;
         }
     }
 
     public async Task<string> PutAsync(string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
     {
-        var response = await PutAsync(NewPut(key, content), cancellationToken);
+        var response = await PutAsync(client, NewPut(key, content), cancellationToken);
         return response.ETag;
     }
 
@@ -98,9 +119,15 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
             response = await client.ListObjectsV2Async(request, cancellationToken);
             keys.AddRange((response.S3Objects ?? []).Select(entry => entry.Key));
             request.ContinuationToken = response.NextContinuationToken;
+            if (response.IsTruncated == true && string.IsNullOrEmpty(response.NextContinuationToken))
+            {
+                throw new InvalidOperationException("The provider reported a truncated listing without a continuation token.");
+            }
         }
         while (response.IsTruncated == true);
 
+        // The service lists in UTF-8 binary order; compatible providers do not all promise it.
+        keys.Sort(StringComparer.Ordinal);
         return keys;
     }
 
@@ -112,11 +139,11 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
         InputStream = new MemoryStream(content.ToArray()),
     };
 
-    async Task<PutObjectResponse> PutAsync(PutObjectRequest request, CancellationToken cancellationToken)
+    static async Task<PutObjectResponse> PutAsync(IAmazonS3 target, PutObjectRequest request, CancellationToken cancellationToken)
     {
         using (request.InputStream)
         {
-            return await client.PutObjectAsync(request, cancellationToken);
+            return await target.PutObjectAsync(request, cancellationToken);
         }
     }
 
@@ -124,7 +151,7 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
     {
         try
         {
-            var response = await PutAsync(request, cancellationToken);
+            var response = await PutAsync(_conditionalClient, request, cancellationToken);
             return WriteOutcome.Success(response.ETag);
         }
         catch (AmazonS3Exception error) when (ConditionNotMet(error, request))
@@ -135,9 +162,10 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket) : IObjectStor
 
     // 412 is the failed condition. A concurrent conditional write to the same key is answered with
     // 409 ConditionalRequestConflict: somebody else is writing it, which for a lock is the same thing.
-    // Replacing "if unchanged" an object that no longer exists (404) means it changed.
+    // Replacing "if unchanged" an object that no longer exists (404 NoSuchKey) means it changed; any other
+    // 404 (NoSuchBucket) is a configuration error.
     static bool ConditionNotMet(AmazonS3Exception error, PutObjectRequest request) =>
         error.StatusCode == HttpStatusCode.PreconditionFailed
         || (error.StatusCode == HttpStatusCode.Conflict && error.ErrorCode == "ConditionalRequestConflict")
-        || (error.StatusCode == HttpStatusCode.NotFound && request.IfMatch is not null);
+        || (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode == "NoSuchKey" && request.IfMatch is not null);
 }
