@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup Label="Application">
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.12" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.1.0" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.12" />
     <!-- Exact version: only versions whose author published a responsible declaration (see README). -->
