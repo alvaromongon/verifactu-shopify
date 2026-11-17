@@ -65,7 +65,7 @@ Opción elegida: «B, la carpeta de la librería en un almacenamiento de objetos
 
 Cómo sería una ejecución, por emisor:
 
-1. Adquirir el cerrojo con una escritura condicional en el mismo bucket: `If-None-Match` en S3, o un *lease* en Blob. Esto resuelve también [#16](https://github.com/alvaromongon/verifactu-shopify/issues/16).
+1. Adquirir el cerrojo con una escritura condicional en el mismo bucket: `If-None-Match: *` para crearlo y `If-Match` con el ETag para renovarlo o soltarlo, tanto en S3 como en Blob. Aclaración posterior: en Blob no se usa un *lease*; la caducidad va dentro del objeto, como en S3, y el cerrojo se comporta igual en los dos proveedores. Esto resuelve también [#16](https://github.com/alvaromongon/verifactu-shopify/issues/16).
 2. Descargar la cadena (`Blockchains`) y los envíos pendientes a un directorio temporal, y apuntar la librería a él con `VeriFactuEnvironment.Path`. Lo ya enviado se queda en el bucket y no se descarga.
 3. Comprobar la cabeza local contra la AEAT, como hace hoy `cadena`. Si la AEAT está un registro por delante y ese registro encadena con la cabeza local, fue un envío aceptado cuyo estado no llegó a subirse. En cualquier otro caso, parar.
 4. Enviar con `DisableBlockchainDelete = true` (valor por defecto a partir de la versión que publique el arreglo de #297), para que un rechazo o un envío sin respuesta no saquen el registro de la cadena. Subir los ficheros cambiados tras cada envío.
