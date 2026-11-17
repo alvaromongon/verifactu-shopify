@@ -29,7 +29,10 @@ public interface IObjectStore
     /// <summary>Writes the object only when the key does not exist yet (<c>If-None-Match: *</c>).</summary>
     Task<WriteOutcome> PutIfAbsentAsync(string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the object only when its ETag is still <paramref name="eTag"/> (<c>If-Match</c>).</summary>
+    /// <summary>
+    /// Replaces the object only when its ETag is still <paramref name="eTag"/> (<c>If-Match</c>). A null or
+    /// empty ETag is an <see cref="ArgumentException"/>: it would be an unconditional write on some providers.
+    /// </summary>
     Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes an object. Deleting a missing one is not an error.</summary>

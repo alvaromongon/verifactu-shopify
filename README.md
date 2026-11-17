@@ -75,8 +75,8 @@ src/VerifactuShopify/
   Configuration/  lectura de la configuración y cultura del proceso
   Invoicing/      regla de facturación, serie y mapeo de pedido a factura
   Shopify/        cliente GraphQL de Shopify y lectura de sus pedidos
-  Storage/        almacenamiento de objetos (S3 y compatibles) con escrituras condicionales; aún sin usar
-  Sync/           una pasada de la sincronización y su configuración
+  Storage/        almacenamiento de objetos (S3 y compatibles) con escrituras condicionales; solo lo usa el cerrojo, y aún no desde el host
+  Sync/           una pasada de la sincronización, su configuración y el cerrojo por emisor
   Program.cs      comandos de la línea de comandos
 docs/
   agents/         ciclo de las issues con agentes
@@ -168,7 +168,7 @@ dotnet run --project src/VerifactuShopify -- sincronizar
 
 ## Sincronización con Shopify
 
-`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
+`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez para el mismo emisor: lo impide el [cerrojo](#cerrojo-entre-ejecuciones). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
 
 ### App de Shopify
 
@@ -216,11 +216,23 @@ La descripción de cada registro empieza por el pedido: `Pedido #1001 (581234567
 - **Si un envío se queda sin respuesta**, la siguiente ejecución lo comprueba en la AEAT: si no llegó, lo envía otra vez con el mismo número.
 - **Si la AEAT rechaza un registro**, la ejecución se para y termina con error.
 
+### Cerrojo entre ejecuciones
+
+Dos ejecuciones a la vez para el mismo emisor encadenarían sobre la misma cabeza y romperían la cadena, y `concurrencyPolicy: Forbid` no cubre una ejecución manual ni dos despliegues sobre el mismo emisor. Por eso cada pasada toma un cerrojo antes de hacer nada, ni siquiera cargar la cadena ([ADR-0002](docs/decisions/0002-estado-de-la-cadena-en-almacenamiento-externo.md)).
+
+- **Dónde está**: un objeto por emisor en el bucket, bajo el prefijo `locks/` (que no usa nada más), con el emisor escapado como un solo segmento de la clave. Se toma con una escritura «crear si no existe» y se renueva, se quita a uno caducado y se suelta con «sustituir si no ha cambiado».
+- **Caducidad**: va dentro del objeto (10 minutos). Una ejecución que muere deja un cerrojo que se libera solo; no se usa *lease* de Blob. La pasada lo renueva antes de cada envío y, si ya es de otra ejecución, se detiene sin enviar más y termina con error.
+- **Si está ocupado**: la pasada no envía nada, lo dice en la salida (`Cerrojo: ocupado por otra ejecución hasta …`) y termina con 0, porque no es un fallo.
+- **Conflicto al adquirirlo**: S3 puede contestar 409 `ConditionalRequestConflict` a dos escrituras simultáneas sin que ninguna haya ganado todavía. Se trata como ocupado: la pasada se salta, lo dice en la salida (`Cerrojo: conflicto al adquirirlo …`, distinto de un error) y la siguiente lo reintenta.
+- **Tras un error de red en una escritura**, el cerrojo lee el objeto de vuelta antes de decidir si llegó, y no lo da por ganado ni por perdido a ciegas.
+- **Si se pierde, no se pierde nada más**: la cadena sigue en el bucket y la AEAT conserva los registros. Lo peor es que dos pasadas se solapen hasta que la primera renueve y se entere.
+- **Sin bucket configurado** el cerrojo no se usa y la salida lo dice (`Cerrojo: sin almacén configurado …`). Enlazar el bucket con la configuración es [#55](https://github.com/alvaromongon/verifactu-shopify/issues/55).
+
 ### Códigos de salida
 
 | Código | Significado |
 |---|---|
-| 0 | Todo enviado, o nada que enviar |
+| 0 | Todo enviado, o nada que enviar (también si otra ejecución tiene el cerrojo) |
 | 1 | Error: la AEAT rechazó un registro, Shopify o la AEAT no respondieron, o la configuración no es válida. Hay que mirarlo |
 | 2 | Todo lo que se podía enviar se envió, pero quedan pedidos para revisar a mano |
 
@@ -276,7 +288,7 @@ Lo que significa cada clave está en [Configuración](#configuración).
 ### Requisitos
 
 - **Intervalo**: 5 minutos. Es el retraso entre el cobro y la factura, y el margen se suma a él. Entre los dos no deben pasar de 60 minutos ([#12](https://github.com/alvaromongon/verifactu-shopify/issues/12)).
-- **Una sola ejecución a la vez** por emisor, hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)): en Kubernetes, `concurrencyPolicy: Forbid`; con cron, `flock`.
+- **Una sola ejecución a la vez** por emisor. El [cerrojo](#cerrojo-entre-ejecuciones) lo garantiza cuando el conector tenga el bucket configurado ([#55](https://github.com/alvaromongon/verifactu-shopify/issues/55)); hasta entonces, en Kubernetes, `concurrencyPolicy: Forbid`; con cron, `flock`.
 - **Carpeta de datos de VeriFactu vacía y con permiso de escritura** en cada ejecución (en Linux, `/usr/share/VeriFactu`). No hace falta conservarla: un volumen temporal basta ([Datos locales de VeriFactu](#datos-locales-de-verifactu)).
 - **Códigos de salida**: 1 es un error; 2 son pedidos para revisar a mano ([Códigos de salida](#códigos-de-salida)). Casi ningún planificador distingue el 2 del 1. Si no quieres que el 2 cuente como fallo:
   - con systemd, `SuccessExitStatus=2`;
@@ -295,7 +307,7 @@ metadata:
   name: verifactu-shopify
 spec:
   schedule: "*/5 * * * *"
-  concurrencyPolicy: Forbid        # Nunca dos ejecuciones a la vez (#16)
+  concurrencyPolicy: Forbid        # Nunca dos ejecuciones a la vez (hasta el cerrojo, #55)
   startingDeadlineSeconds: 120
   jobTemplate:
     spec:
@@ -348,7 +360,7 @@ Cada registro lleva la huella del anterior. La AEAT es la fuente de verdad de es
 - **El mismo NIF puede facturar desde otros sistemas**, como el TPV de Shopify, y cada uno tiene su propia cadena. El conector solo mira los registros de su sistema: el NIF del productor, `IdSistemaInformatico` y `NumeroInstalacion`. Por eso el número de instalación tiene que ser fijo y no repetirse nunca.
 - **Si el último registro tiene más de un mes, hoy no se encuentra**: el siguiente saldría como primer registro y la cadena quedaría rota. Pasa si la tienda pasa más de un mes sin ventas o el conector está parado. Pendiente en [#22](https://github.com/alvaromongon/verifactu-shopify/issues/22).
 - **Solo se anulan facturas del mes actual o del anterior**, que son los dos meses que se consultan. Lo más antiguo se corrige con una rectificativa.
-- **Dos ejecuciones a la vez para el mismo emisor romperían la cadena.** Hasta que exista el cerrojo ([#16](https://github.com/alvaromongon/verifactu-shopify/issues/16)), no puede haber más de una a la vez.
+- **Dos ejecuciones a la vez para el mismo emisor romperían la cadena.** Lo impide el [cerrojo](#cerrojo-entre-ejecuciones), que el host usará en cuanto se configure el bucket ([#55](https://github.com/alvaromongon/verifactu-shopify/issues/55)): hasta entonces no puede haber más de una a la vez.
 
 ## Datos locales de VeriFactu
 

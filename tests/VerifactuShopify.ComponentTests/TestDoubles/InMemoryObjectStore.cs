@@ -36,6 +36,7 @@ public sealed class InMemoryObjectStore : IObjectStore
 
     public Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(eTag);
         lock (_gate)
         {
             var unchanged = _objects.TryGetValue(key, out var current) && current.ETag == eTag;

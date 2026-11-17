@@ -10,6 +10,7 @@ using VerifactuShopify.Aeat;
 using VerifactuShopify.Configuration;
 using VerifactuShopify.Invoicing;
 using VerifactuShopify.Shopify;
+using VerifactuShopify.Storage;
 
 namespace VerifactuShopify.Sync;
 
@@ -25,7 +26,60 @@ public static class OrderSync
     public const int Failure = 1;
     public const int NeedsReview = 2;
 
-    public static async Task<int> RunAsync(IConfiguration configuration, SistemaInformatico sistema, HttpClient http, DateTimeOffset now)
+    // Long enough for a run with a backlog (see the SLO) between two renewals, short enough that a run
+    // that died blocks the next ones for minutes, not hours.
+    public static readonly TimeSpan LockTimeToLive = TimeSpan.FromMinutes(10);
+
+    // The lock goes in the bucket, which the host does not link yet (#55): without a store the run
+    // goes ahead unlocked, as it did before the lock existed.
+    public static async Task<int> RunAsync(
+        IConfiguration configuration, SistemaInformatico sistema, HttpClient http, DateTimeOffset now,
+        IObjectStore? lockStore = null, TimeProvider? clock = null)
+    {
+        var sellerNif = configuration.GetRequired(VerifactuShopify.Configuration.ConfigurationExtensions.SellerNifKey);
+        if (lockStore is null)
+        {
+            Console.WriteLine("Cerrojo:     sin almacén configurado, no se comprueba que no haya otra ejecución a la vez");
+            return await SyncAsync(configuration, sistema, http, now, held: null);
+        }
+
+        // Before anything else: not even the chain is loaded while another run may be sending.
+        var attempt = await IssuerLock.TryAcquireAsync(lockStore, sellerNif, LockTimeToLive, clock ?? TimeProvider.System);
+        switch (attempt.State)
+        {
+            case LockState.Held:
+                Console.WriteLine($"Cerrojo:     ocupado por otra ejecución hasta {attempt.HeldUntil:O}; esta pasada no envía nada");
+                return Success;
+            case LockState.Contended:
+                Console.WriteLine("Cerrojo:     conflicto al adquirirlo (otra ejecución lo estaba escribiendo); esta pasada no envía nada y la siguiente lo reintenta");
+                return Success;
+        }
+
+        var held = attempt.Lock!;
+        try
+        {
+            return await SyncAsync(configuration, sistema, http, now, held);
+        }
+        finally
+        {
+            await ReleaseAsync(held);
+        }
+    }
+
+    // A failed release must not hide how the run ended: the lock expires on its own.
+    static async Task ReleaseAsync(IssuerLock held)
+    {
+        try
+        {
+            await held.ReleaseAsync();
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Console.WriteLine($"Cerrojo:     no se pudo soltar ({error.Message}); caducará solo en {LockTimeToLive.TotalMinutes:0} minutos como máximo");
+        }
+    }
+
+    static async Task<int> SyncAsync(IConfiguration configuration, SistemaInformatico sistema, HttpClient http, DateTimeOffset now, IssuerLock? held)
     {
         var settings = SyncSettings.From(configuration);
         var sellerNif = configuration.GetRequired(VerifactuShopify.Configuration.ConfigurationExtensions.SellerNifKey);
@@ -84,6 +138,13 @@ public static class OrderSync
                 Console.WriteLine($"{label}: revisar a mano. {ex.Message}");
                 needsReview = true;
                 continue;
+            }
+
+            // A lock lost to another run (this one stalled past the expiry): stop before sending anything more.
+            if (held is not null && !await held.RenewAsync())
+            {
+                Console.WriteLine($"{label}: el cerrojo ya es de otra ejecución; esta se detiene sin enviar más.");
+                return Failure;
             }
 
             var entry = new InvoiceEntry(invoice);
