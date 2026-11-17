@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 
 using Amazon;
 using Amazon.Runtime;
@@ -19,14 +20,31 @@ public sealed record S3ObjectStoreOptions(string Bucket, string? ServiceUrl = nu
 /// <c>If-None-Match</c> and <c>If-Match</c> headers, so the same code works wherever they are honoured.
 /// </summary>
 /// <remarks>
-/// Conditional writes go through <c>conditionalClient</c>, which must not retry: when a write succeeded but
-/// its response was lost, a retry would be answered with 412 and reported as <see cref="WriteOutcome.ConditionNotMet"/>
+/// Conditional writes go through a second client that does not retry; the constructor is private so the only
+/// way in is <see cref="Create"/> and that client cannot be left out. When a write succeeded but its response
+/// was lost, a retry would be answered with 412 and reported as <see cref="WriteOutcome.ConditionNotMet"/>
 /// although this caller wrote the object. Without retries that case surfaces as an exception, an ambiguous
 /// result the caller (the lock) has to resolve by reading the object back.
 /// </remarks>
-public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? conditionalClient = null) : IObjectStore
+public sealed class S3ObjectStore : IObjectStore, IDisposable
 {
-    readonly IAmazonS3 _conditionalClient = conditionalClient ?? client;
+    readonly IAmazonS3 _client;
+    readonly IAmazonS3 _conditionalClient;
+    readonly string _bucket;
+
+    S3ObjectStore(IAmazonS3 client, IAmazonS3 conditionalClient, string bucket)
+    {
+        _client = client;
+        _conditionalClient = conditionalClient;
+        _bucket = bucket;
+    }
+
+    /// <summary>Releases the two clients.</summary>
+    public void Dispose()
+    {
+        _client.Dispose();
+        _conditionalClient.Dispose();
+    }
 
     /// <summary>
     /// Builds a store. Without <paramref name="credentials"/> it uses the SDK's default chain
@@ -40,7 +58,7 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? co
         var conditionalConfig = NewConfig(options);
         conditionalConfig.MaxErrorRetry = 0;
 
-        return new S3ObjectStore(NewClient(credentials, config), options.Bucket, NewClient(credentials, conditionalConfig));
+        return new S3ObjectStore(NewClient(credentials, config), NewClient(credentials, conditionalConfig), options.Bucket);
     }
 
     static AmazonS3Client NewClient(AWSCredentials? credentials, AmazonS3Config config) =>
@@ -74,21 +92,22 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? co
     {
         try
         {
-            using var response = await client.GetObjectAsync(bucket, key, cancellationToken);
+            using var response = await _client.GetObjectAsync(_bucket, key, cancellationToken);
             using var content = new MemoryStream();
             await response.ResponseStream.CopyToAsync(content, cancellationToken);
             return new StoredObject(content.ToArray(), response.ETag);
         }
-        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode == "NoSuchKey")
+        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode != "NoSuchBucket")
         {
-            // Only a missing key: a missing bucket (NoSuchBucket) is a configuration error and must surface.
+            // A missing key. Compatible providers answer it with other codes, or with no body, so any 404
+            // counts except a missing bucket (NoSuchBucket), a configuration error that must surface.
             return null;
         }
     }
 
     public async Task<string> PutAsync(string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
     {
-        var response = await PutAsync(client, NewPut(key, content), cancellationToken);
+        var response = await PutAsync(_client, NewPut(key, content), cancellationToken);
         return response.ETag;
     }
 
@@ -108,16 +127,16 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? co
     }
 
     public async Task DeleteAsync(string key, CancellationToken cancellationToken = default) =>
-        await client.DeleteObjectAsync(bucket, key, cancellationToken);
+        await _client.DeleteObjectAsync(_bucket, key, cancellationToken);
 
     public async Task<IReadOnlyList<string>> ListAsync(string prefix, CancellationToken cancellationToken = default)
     {
         var keys = new List<string>();
-        var request = new ListObjectsV2Request { BucketName = bucket, Prefix = prefix };
+        var request = new ListObjectsV2Request { BucketName = _bucket, Prefix = prefix };
         ListObjectsV2Response response;
         do
         {
-            response = await client.ListObjectsV2Async(request, cancellationToken);
+            response = await _client.ListObjectsV2Async(request, cancellationToken);
             keys.AddRange((response.S3Objects ?? []).Select(entry => entry.Key));
             request.ContinuationToken = response.NextContinuationToken;
             if (response.IsTruncated == true && string.IsNullOrEmpty(response.NextContinuationToken))
@@ -127,17 +146,22 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? co
         }
         while (response.IsTruncated == true);
 
-        // The service lists in UTF-8 binary order; compatible providers do not all promise it.
+        // The service lists in UTF-8 binary order; compatible providers do not all promise it. Sort the same
+        // way everywhere, by UTF-16 code unit: it differs from UTF-8 byte order only for characters
+        // outside the Basic Multilingual Plane, and callers must not depend on that difference.
         keys.Sort(StringComparer.Ordinal);
         return keys;
     }
 
     PutObjectRequest NewPut(string key, ReadOnlyMemory<byte> content) => new()
     {
-        BucketName = bucket,
+        BucketName = _bucket,
         Key = key,
-        // The request owns its stream and disposes it when the call ends.
-        InputStream = new MemoryStream(content.ToArray()),
+        // The request owns its stream and disposes it when the call ends. It reads the caller's buffer in
+        // place when it can: the content is not modified while the call runs.
+        InputStream = MemoryMarshal.TryGetArray(content, out var segment) && segment.Array is not null
+            ? new MemoryStream(segment.Array, segment.Offset, segment.Count, writable: false)
+            : new MemoryStream(content.ToArray()),
     };
 
     static async Task<PutObjectResponse> PutAsync(IAmazonS3 target, PutObjectRequest request, CancellationToken cancellationToken)

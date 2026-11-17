@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security;
-using System.Security.Cryptography;
 using System.Text;
 
 using WireMock.Server;
@@ -130,7 +129,7 @@ public sealed class S3Stub : IDisposable
             content = DecodeChunks(content);
         }
 
-        var eTag = $"\"{Convert.ToHexStringLower(SHA256.HashData(content)[..16])}\"";
+        var eTag = ETags.Of(content);
         _objects[key] = (content, eTag);
         return Response(HttpStatusCode.OK, [], null, eTag);
     }
@@ -208,8 +207,9 @@ public sealed class S3Stub : IDisposable
     static string? Query(WireMock.IRequestMessage request, string name) =>
         request.Query?.FirstOrDefault(parameter => string.Equals(parameter.Key, name, StringComparison.Ordinal)).Value?[0];
 
+    // An empty code is an error response without a body, as some compatible providers send.
     static WireMock.ResponseMessage Error(int status, string code) =>
-        Response((HttpStatusCode)status, Encoding.UTF8.GetBytes(
+        code.Length == 0 ? Response((HttpStatusCode)status, [], null, null) : Response((HttpStatusCode)status, Encoding.UTF8.GetBytes(
             $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>{code}</Code><Message>{code}</Message></Error>"), "application/xml", null);
 
     static WireMock.ResponseMessage Response(HttpStatusCode status, byte[] body, string? contentType, string? eTag)
