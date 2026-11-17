@@ -182,7 +182,7 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
     [Fact]
     public async Task Disposing_the_store_releases_both_clients()
     {
-        var store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true));
+        using var store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true));
 
         store.Dispose();
         store.Dispose();
