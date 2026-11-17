@@ -39,12 +39,13 @@ public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, D
 
 /// <summary>
 /// A conditional write failed and so did the read that checks whether it landed. The write's error is the
-/// one that matters (its type and message are in <see cref="WriteError"/>); the read's is the inner exception.
+/// one that matters, so it is the inner exception; the read's is in <see cref="ReadError"/>. It is an
+/// <see cref="InvalidOperationException"/> so the host reports it and exits with 1 instead of crashing.
 /// </summary>
-public sealed class LockWriteException(string message, Exception writeError, Exception readError) : Exception(message, readError)
+public sealed class LockWriteException(string message, Exception writeError, Exception readError) : InvalidOperationException(message, writeError)
 {
-    /// <summary>The error of the original write.</summary>
-    public Exception WriteError { get; } = writeError;
+    /// <summary>The error of the read that checked whether the write landed.</summary>
+    public Exception ReadError { get; } = readError;
 }
 
 /// <summary>

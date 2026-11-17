@@ -75,7 +75,7 @@ public static class OrderSync
         }
     }
 
-    // A failed release must not hide how the run ended: the lock expires on its own.
+    // A failed release must not hide how the run ended: the lock expires on its own (TTL plus the skew margin).
     static async Task ReleaseAsync(IssuerLock held)
     {
         try
@@ -84,7 +84,7 @@ public static class OrderSync
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            Console.WriteLine($"Cerrojo:     no se pudo soltar ({error.Message}); caducará solo en {LockTimeToLive.TotalMinutes:0} minutos como máximo");
+            Console.WriteLine($"Cerrojo:     no se pudo soltar ({error.Message}); otra ejecución podrá tomarlo pasados {LockTimeToLive.TotalMinutes:0} minutos más {IssuerLock.ClockSkewMargin.TotalSeconds:0} s de margen como máximo");
         }
     }
 

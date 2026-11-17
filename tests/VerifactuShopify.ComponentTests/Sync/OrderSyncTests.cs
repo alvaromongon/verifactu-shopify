@@ -270,13 +270,38 @@ public sealed class OrderSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_that_finds_the_lock_taken_over_right_before_a_send_does_not_send()
+    {
+        const string SellerNif = "00000027G";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        // The listing passes its check; the run stalls while Shopify answers the order and another run takes the lock.
+        var requests = 0;
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        {
+            if (++requests != 3)
+            {
+                return;
+            }
+
+            _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
+            AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
+        }));
+
+        Assert.True(requests >= 3);
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Empty(_aeat.Altas());
+        Assert.Contains("(#1001 (1))", output, StringComparison.Ordinal);
+        Assert.Contains("ya es de otra ejecución", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_run_that_finds_the_lock_taken_over_while_it_works_stops_before_sending()
     {
         const string SellerNif = "00000026F";
         _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
         // The run stalls past the expiry while Shopify answers, and another run takes the lock.
         var stalled = false;
-        Task? takeOver = null;
 
         var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
         {
@@ -287,11 +312,9 @@ public sealed class OrderSyncTests : IDisposable
 
             stalled = true;
             _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
-            takeOver = AnotherRunHoldsTheLockAsync(SellerNif);
-            takeOver.GetAwaiter().GetResult();
+            AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
         }));
 
-        Assert.NotNull(takeOver);
         Assert.Equal(OrderSync.Failure, exitCode);
         Assert.Empty(_aeat.Altas());
         Assert.Contains("ya es de otra ejecución", output, StringComparison.Ordinal);

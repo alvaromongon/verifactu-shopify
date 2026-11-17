@@ -28,10 +28,6 @@ public sealed class FaultyObjectStore(IObjectStore inner) : IObjectStore
     Fault? _nextReplace;
     bool _failNextRead;
 
-    // Runs once, just before the next replace-if-unchanged: lets a test change the world between the
-    // moment the caller read an ETag and the moment it uses it.
-    public Func<Task>? BeforeNextReplace { get; set; }
-
     public void FailNextConditionalWrite(Fault fault) => _next = fault;
 
     // The next read throws, as when the service is down for the check that follows a failed write.
@@ -60,13 +56,6 @@ public sealed class FaultyObjectStore(IObjectStore inner) : IObjectStore
     public Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default) =>
         WithFault(_nextReplace is null ? null : TakeReplaceFault(), async () =>
         {
-            var before = BeforeNextReplace;
-            BeforeNextReplace = null;
-            if (before is not null)
-            {
-                await before();
-            }
-
             return await inner.PutIfUnchangedAsync(key, content, eTag, cancellationToken);
         });
 

@@ -133,7 +133,7 @@ public sealed class IssuerLockTests
     }
 
     [Fact]
-    public async Task A_failed_write_whose_read_back_also_fails_reports_the_write_error_with_the_read_as_cause()
+    public async Task A_failed_write_whose_read_back_also_fails_reports_the_write_error_as_cause_and_keeps_the_read_one()
     {
         var store = new FaultyObjectStore(_store);
         var held = (await AcquireAsync(store)).Lock!;
@@ -143,10 +143,12 @@ public sealed class IssuerLockTests
 
         var error = await Assert.ThrowsAsync<LockWriteException>(() => held.RenewAsync(Ct));
 
-        Assert.IsType<HttpRequestException>(error.WriteError);
-        Assert.Equal("The service is unavailable.", error.WriteError.Message);
         Assert.IsType<HttpRequestException>(error.InnerException);
+        Assert.Equal("The service is unavailable.", error.InnerException.Message);
+        Assert.IsType<HttpRequestException>(error.ReadError);
         Assert.Contains("The service is unavailable.", error.Message, StringComparison.Ordinal);
+        // The host (Program.cs) prints and exits with 1 on this type; anything else would crash unhandled.
+        Assert.IsAssignableFrom<InvalidOperationException>(error);
     }
 
     [Fact]
