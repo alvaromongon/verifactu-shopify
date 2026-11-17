@@ -1,5 +1,6 @@
 using VerifactuShopify.Aeat;
 using VerifactuShopify.ComponentTests.TestDoubles;
+using VerifactuShopify.Storage;
 using VerifactuShopify.Sync;
 
 namespace VerifactuShopify.ComponentTests.Sync;
@@ -17,13 +18,16 @@ public sealed class OrderSyncTests : IDisposable
 
     readonly List<string> _sellers = [];
 
-    async Task<int> RunAsync(string sellerNif, Dictionary<string, string?>? overrides = null)
+    readonly InMemoryObjectStore _locks = new();
+    readonly FakeClock _clock = new(Now);
+
+    async Task<int> RunAsync(string sellerNif, Dictionary<string, string?>? overrides = null, IObjectStore? lockStore = null)
     {
         _sellers.Add(sellerNif);
         var configuration = SyncConfiguration.Create(sellerNif, overrides);
         var sistema = SistemaInformaticoSetup.Configure(configuration);
         using var http = _shopify.CreateClient();
-        return await OrderSync.RunAsync(configuration, sistema, http, Now);
+        return await OrderSync.RunAsync(configuration, sistema, http, Now, lockStore, _clock);
     }
 
     [Fact]
@@ -178,6 +182,126 @@ public sealed class OrderSyncTests : IDisposable
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync("00000009D"));
 
         Assert.Contains("read_orders", error.Message, StringComparison.Ordinal);
+    }
+
+    static async Task<(int ExitCode, string Output)> CapturingOutputAsync(Func<Task<int>> run)
+    {
+        var original = Console.Out;
+        using var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            return (await run(), captured.ToString());
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+    }
+
+    Task<LockAcquisition> AnotherRunHoldsTheLockAsync(string sellerNif) =>
+        IssuerLock.TryAcquireAsync(_locks, sellerNif, OrderSync.LockTimeToLive, _clock, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task A_run_finding_the_lock_held_by_another_sends_nothing_and_says_so_without_failing()
+    {
+        const string SellerNif = "00000021A";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        await AnotherRunHoldsTheLockAsync(SellerNif);
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks));
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Contains("ocupado por otra ejecución", output, StringComparison.Ordinal);
+        Assert.Empty(_aeat.Altas());
+        Assert.Equal(0, _aeat.Consultas());
+    }
+
+    [Fact]
+    public async Task A_run_with_the_lock_sends_and_lets_it_go_at_the_end()
+    {
+        const string SellerNif = "00000022B";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks);
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Single(_aeat.Altas());
+        Assert.Equal(LockState.Acquired, (await AnotherRunHoldsTheLockAsync(SellerNif)).State);
+    }
+
+    [Fact]
+    public async Task The_lock_is_let_go_when_the_run_fails()
+    {
+        const string SellerNif = "00000023C";
+        _aeat.GivenAltasRejected("1100", "Valor o tipo incorrecto del campo");
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks);
+
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Equal(LockState.Acquired, (await AnotherRunHoldsTheLockAsync(SellerNif)).State);
+    }
+
+    [Fact]
+    public async Task The_lock_is_let_go_when_the_run_throws()
+    {
+        const string SellerNif = "00000024D";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        _aeat.GivenAltasFail();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => RunAsync(SellerNif, lockStore: _locks));
+
+        Assert.Equal(LockState.Acquired, (await AnotherRunHoldsTheLockAsync(SellerNif)).State);
+    }
+
+    [Fact]
+    public async Task An_expired_lock_does_not_stop_the_next_run()
+    {
+        const string SellerNif = "00000025E";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        await AnotherRunHoldsTheLockAsync(SellerNif);
+        _clock.Advance(OrderSync.LockTimeToLive);
+
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks);
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Single(_aeat.Altas());
+    }
+
+    [Fact]
+    public async Task A_run_that_finds_the_lock_taken_over_while_it_works_stops_before_sending()
+    {
+        const string SellerNif = "00000026F";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        var locks = new FaultyObjectStore(_locks);
+        // The run stalls past the expiry before its first send and another run takes the lock.
+        locks.BeforeNextReplace = async () =>
+        {
+            _clock.Advance(OrderSync.LockTimeToLive);
+            await AnotherRunHoldsTheLockAsync(SellerNif);
+        };
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: locks));
+
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Empty(_aeat.Altas());
+        Assert.Contains("el cerrojo ya es de otra ejecución", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_run_skipped_by_a_conflict_on_the_lock_says_so_and_does_not_fail()
+    {
+        const string SellerNif = "00000027G";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        var locks = new FaultyObjectStore(_locks);
+        locks.FailNextConditionalWrite(Fault.Conflict);
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: locks));
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Contains("conflicto al adquirirlo", output, StringComparison.Ordinal);
+        Assert.Empty(_aeat.Altas());
     }
 
     public void Dispose()

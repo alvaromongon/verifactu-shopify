@@ -101,6 +101,7 @@ public sealed class S3ObjectStore(IAmazonS3 client, string bucket, IAmazonS3? co
 
     public async Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(eTag);
         var request = NewPut(key, content);
         request.IfMatch = eTag;
         return await PutConditionalAsync(request, cancellationToken);

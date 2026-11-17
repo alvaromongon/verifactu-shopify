@@ -98,6 +98,18 @@ public abstract class ObjectStoreContractTests
         Assert.Null(await Store.GetAsync("lock", Ct));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Replace_if_unchanged_rejects_a_missing_etag_instead_of_writing_unconditionally(string? eTag)
+    {
+        await Store.PutAsync("lock", Bytes("v1"), Ct);
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => Store.PutIfUnchangedAsync("lock", Bytes("v2"), eTag!, Ct));
+
+        Assert.Equal("v1", Text(await Store.GetAsync("lock", Ct)));
+    }
+
     [Fact]
     public async Task A_deleted_object_is_gone_and_deleting_a_missing_one_is_fine()
     {
