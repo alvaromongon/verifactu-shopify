@@ -21,6 +21,7 @@ public enum LockState
     Contended,
 }
 
+/// <summary>The result of trying to take an issuer's lock.</summary>
 /// <param name="State">What happened.</param>
 /// <param name="Lock">The lock, only when <paramref name="State"/> is <see cref="LockState.Acquired"/>.</param>
 /// <param name="HeldUntil">When the holder's lock expires, only when <paramref name="State"/> is <see cref="LockState.Held"/>.</param>
@@ -138,7 +139,8 @@ public sealed class IssuerLock
         // A refused write is not always a lost lock: a 409 conflict leaves it untouched. Still ours and
         // unchanged means we keep it (the next renewal will extend it).
         var stored = await _store.GetAsync(_key, cancellationToken);
-        return stored is not null && stored.ETag == _eTag && Parse(stored)?.Owner == _owner;
+        return stored is not null && stored.ETag == _eTag
+            && Parse(stored) is { } record && record.Owner == _owner && record.ExpiresAt > _clock.GetUtcNow();
     }
 
     /// <summary>

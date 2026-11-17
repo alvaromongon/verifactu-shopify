@@ -267,6 +267,17 @@ public sealed class IssuerLockTests
     }
 
     [Fact]
+    public async Task A_conflict_on_renewing_after_the_lock_expired_loses_it_even_if_nobody_took_it_over()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(Ttl);
+        store.FailNextReplace(Fault.Conflict);
+
+        Assert.False(await held.RenewAsync(Ct));
+    }
+
+    [Fact]
     public async Task A_conflict_on_renewing_a_lock_taken_over_by_another_run_loses_it()
     {
         var store = new FaultyObjectStore(_store);
