@@ -1,5 +1,3 @@
-using System.Text;
-
 using Amazon.Runtime;
 using Amazon.S3;
 
@@ -10,25 +8,26 @@ namespace VerifactuShopify.ComponentTests.Storage;
 
 // The contract against the S3 implementation pointed at the S3 stub, plus what only an HTTP
 // implementation has: the headers it sends and how it reads the errors.
+// The store is built the way production builds it (Create), so the contract also covers its real
+// configuration: checksums only when required and a client that does not retry conditional writes.
 public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
 {
     readonly S3Stub _s3 = new();
-    readonly IObjectStore _store;
+    readonly S3ObjectStore _store;
 
     public S3ObjectStoreTests() =>
-        _store = new S3ObjectStore(
-            new AmazonS3Client(
-                new BasicAWSCredentials("test-access-key", "test-secret-key"),
-                new AmazonS3Config { ServiceURL = _s3.Url, ForcePathStyle = true, AuthenticationRegion = "eu-west-1" }),
-            S3Stub.Bucket);
+        _store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true));
 
     protected override IObjectStore Store => _store;
 
-    public void Dispose() => _s3.Dispose();
+    public void Dispose()
+    {
+        _store.Dispose();
+        _s3.Dispose();
+    }
 
-    static ReadOnlyMemory<byte> Bytes(string text) => Encoding.UTF8.GetBytes(text);
-
-    static CancellationToken Ct => TestContext.Current.CancellationToken;
+    static S3ObjectStore NewStore(S3ObjectStoreOptions options) =>
+        S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"));
 
     [Fact]
     public async Task Create_if_absent_sends_if_none_match_star()
@@ -102,10 +101,7 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
     [Fact]
     public async Task A_store_built_from_options_talks_to_a_compatible_endpoint_in_path_style_without_checksum_trailers()
     {
-        var options = new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true);
-        var store = S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"));
-
-        await store.PutAsync("one.txt", Bytes("x"), Ct);
+        await Store.PutAsync("one.txt", Bytes("x"), Ct);
 
         var put = Assert.Single(_s3.Requests, request => request.Method == "PUT");
         Assert.Equal($"/{S3Stub.Bucket}/one.txt", put.Path);
@@ -121,6 +117,16 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
         await Assert.ThrowsAsync<AmazonS3Exception>(() => Store.GetAsync("one.txt", Ct));
     }
 
+    [Theory]
+    [InlineData("NotFound")]
+    [InlineData("")]
+    public async Task A_404_with_another_code_or_no_body_reads_as_a_missing_object(string code)
+    {
+        _s3.FailWith(404, code);
+
+        Assert.Null(await Store.GetAsync("one.txt", Ct));
+    }
+
     [Fact]
     public async Task A_missing_bucket_on_a_conditional_write_is_an_error_not_a_condition_not_met()
     {
@@ -134,12 +140,9 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
     [Fact]
     public async Task A_conditional_write_is_not_retried_by_the_sdk_so_a_lost_response_is_never_replayed()
     {
-        var store = S3ObjectStore.Create(
-            new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true),
-            new BasicAWSCredentials("test-access-key", "test-secret-key"));
         _s3.FailWith(503, "ServiceUnavailable");
 
-        await Assert.ThrowsAsync<AmazonS3Exception>(() => store.PutIfAbsentAsync("lock", Bytes("v"), Ct));
+        await Assert.ThrowsAsync<AmazonS3Exception>(() => Store.PutIfAbsentAsync("lock", Bytes("v"), Ct));
 
         Assert.Single(_s3.Requests, request => request.Method == "PUT");
     }
@@ -147,8 +150,7 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
     [Fact]
     public async Task An_empty_region_is_treated_as_unset()
     {
-        var options = new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, Region: "", ForcePathStyle: true);
-        var store = S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"));
+        using var store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, Region: "", ForcePathStyle: true));
 
         await store.PutAsync("one.txt", Bytes("x"), Ct);
 
@@ -175,6 +177,18 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
         _s3.ListTruncatedWithoutToken();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => Store.ListAsync(string.Empty, Ct));
+    }
+
+    [Fact]
+    public async Task Disposing_the_store_releases_both_clients()
+    {
+        using var store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true));
+
+        store.Dispose();
+        store.Dispose();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => store.PutAsync("one.txt", Bytes("x"), Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => store.PutIfAbsentAsync("lock", Bytes("x"), Ct));
     }
 
     [Fact]

@@ -10,9 +10,9 @@ public abstract class ObjectStoreContractTests
 {
     protected abstract IObjectStore Store { get; }
 
-    static CancellationToken Ct => TestContext.Current.CancellationToken;
+    protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    static ReadOnlyMemory<byte> Bytes(string text) => Encoding.UTF8.GetBytes(text);
+    protected static ReadOnlyMemory<byte> Bytes(string text) => Encoding.UTF8.GetBytes(text);
 
     static string Text(StoredObject? stored) => Encoding.UTF8.GetString(stored!.Content.Span);
 

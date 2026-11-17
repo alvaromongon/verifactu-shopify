@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-
 using VerifactuShopify.Storage;
 
 namespace VerifactuShopify.ComponentTests.TestDoubles;
@@ -64,7 +62,7 @@ public sealed class InMemoryObjectStore : IObjectStore
 
     string Store(string key, ReadOnlyMemory<byte> content)
     {
-        var eTag = $"\"{Convert.ToHexStringLower(SHA256.HashData(content.Span)[..16])}\"";
+        var eTag = ETags.Of(content.Span);
         _objects[key] = new StoredObject(content.ToArray(), eTag);
         return eTag;
     }
