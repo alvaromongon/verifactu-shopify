@@ -30,6 +30,10 @@ public static class OrderSync
     // that died blocks the next ones for minutes, not hours.
     public static readonly TimeSpan LockTimeToLive = TimeSpan.FromMinutes(10);
 
+    // The longest the run waits for the AEAT to answer a send. The library does not expose its own
+    // timeout, so this is a conservative stand-in: a send never starts with less lock left than this.
+    public static readonly TimeSpan SendTimeout = TimeSpan.FromMinutes(2);
+
     // The lock goes in the bucket, which the host does not link yet (#55): without a store the run
     // goes ahead unlocked, as it did before the lock existed.
     public static async Task<int> RunAsync(
@@ -50,6 +54,11 @@ public static class OrderSync
             case LockState.Held:
                 Console.WriteLine($"Cerrojo:     ocupado por otra ejecución hasta {attempt.HeldUntil:O}; esta pasada no envía nada");
                 return Success;
+            case LockState.ImpossibleExpiry:
+                Console.WriteLine(
+                    $"Cerrojo:     el objeto '{attempt.Key}' caduca el {attempt.HeldUntil:O}, más lejos de lo posible (como mucho {LockTimeToLive.TotalMinutes:0} minutos " +
+                    $"más {IssuerLock.ClockSkewMargin.TotalSeconds:0} s); no se toma. Revisa el reloj de los equipos o expíralo a mano.");
+                return Failure;
             case LockState.Contended:
                 Console.WriteLine("Cerrojo:     conflicto al adquirirlo (otra ejecución lo estaba escribiendo); esta pasada no envía nada y la siguiente lo reintenta");
                 return Success;
@@ -88,6 +97,11 @@ public static class OrderSync
         // AEAT first: the same query gives the chain head, the orders already invoiced and the
         // last invoice number, and a chain mismatch stops the run before touching Shopify.
         var records = BlockchainSetup.QueryRecords(sellerNif, sellerName, sistema, BlockchainSetup.Periods(now));
+        if (!await StillHeldAsync(held, "tras consultar la cadena"))
+        {
+            return Failure;
+        }
+
         var head = BlockchainSetup.FindHead(records);
         BlockchainSetup.Load(sellerNif, head);
         Console.WriteLine(head is null
@@ -106,6 +120,11 @@ public static class OrderSync
         var statuses = await shopify.GetOrderStatusesAsync(
             $"financial_status:paid updated_at:>='{since.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture)}'");
 
+        if (!await StillHeldAsync(held, "tras listar los pedidos de Shopify"))
+        {
+            return Failure;
+        }
+
         var pending = statuses
             .Where(order => !invoiced.Contains(order.Id))
             .Where(order => InvoicingRule.Decide(order, now, windowStart, settings.Rule) == InvoicingDecision.Invoice)
@@ -118,8 +137,13 @@ public static class OrderSync
         }
 
         var year = now.Year;
-        var next = settings.Series.Next(SeriesNumbersThisYear(records, settings.Series, year, sellerNif, sellerName, sistema, now),
-            year, settings.LastUsedBefore(year));
+        var numbers = await SeriesNumbersThisYearAsync(records, settings.Series, year, sellerNif, sellerName, sistema, now, held);
+        if (numbers is null)
+        {
+            return Failure;
+        }
+
+        var next = settings.Series.Next(numbers, year, settings.LastUsedBefore(year));
         var mapping = new InvoiceMappingSettings(sellerNif, sellerName, settings.SimplifiedInvoiceLimit);
 
         var needsReview = false;
@@ -141,9 +165,9 @@ public static class OrderSync
             }
 
             // A lock lost to another run (this one stalled past the expiry): stop before sending anything more.
-            if (held is not null && !await held.RenewAsync())
+            // Also before the registro is recorded: the send must not start with less lock left than it can wait.
+            if (!await StillHeldAsync(held, label, SendTimeout))
             {
-                Console.WriteLine($"{label}: el cerrojo ya es de otra ejecución; esta se detiene sin enviar más.");
                 return Failure;
             }
 
@@ -176,6 +200,19 @@ public static class OrderSync
         return needsReview ? NeedsReview : Success;
     }
 
+    // Renews the lock when it is due (cheap to call at every step). False, after saying so, when it is
+    // already another run's: the caller stops without sending anything more.
+    static async Task<bool> StillHeldAsync(IssuerLock? held, string where, TimeSpan minimumRemaining = default)
+    {
+        if (held is null || await held.RenewIfDueAsync(minimumRemaining))
+        {
+            return true;
+        }
+
+        Console.WriteLine($"Cerrojo:     ya es de otra ejecución ({where}); esta se detiene sin enviar más.");
+        return false;
+    }
+
     // Every registro counts, whatever its state: an anulled invoice doesn't bring its order back,
     // and a rejected one needs a look rather than another number.
     public static HashSet<string> InvoicedOrderIds(IEnumerable<RegistroRespuestaConsultaFactuSistemaFacturacion> records) =>
@@ -187,9 +224,10 @@ public static class OrderSync
     // The last number is almost always in the two months already queried. If not (no sales for a
     // while), look further back in the year, month by month, up to the first month that has one:
     // numbers only grow with the issue date, which is what the AEAT groups registros by.
-    static List<string> SeriesNumbersThisYear(
+    // Null when the lock was lost along the way.
+    static async Task<List<string>?> SeriesNumbersThisYearAsync(
         List<RegistroRespuestaConsultaFactuSistemaFacturacion> window, InvoiceSeries series, int year,
-        string sellerNif, string sellerName, SistemaInformatico sistema, DateTimeOffset now)
+        string sellerNif, string sellerName, SistemaInformatico sistema, DateTimeOffset now, IssuerLock? held)
     {
         var numbers = window.Select(record => record.IDFactura.NumSerieFactura).ToList();
         for (var month = now.AddMonths(-2); !numbers.Any(number => series.NumberIn(number, year) is not null) && month.Year == year; month = month.AddMonths(-1))
@@ -197,6 +235,10 @@ public static class OrderSync
             numbers = BlockchainSetup.QueryRecords(sellerNif, sellerName, sistema, [BlockchainSetup.Period(month)])
                 .Select(record => record.IDFactura.NumSerieFactura)
                 .ToList();
+            if (!await StillHeldAsync(held, "tras consultar las series del año"))
+            {
+                return null;
+            }
         }
 
         return numbers;

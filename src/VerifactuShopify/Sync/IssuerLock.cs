@@ -19,13 +19,33 @@ public enum LockState
     /// skipped, and the next one tries again.
     /// </summary>
     Contended,
+
+    /// <summary>
+    /// The lock is held and its expiry is further away than a lock can ever be (a clock set ahead, or a
+    /// corrupt record). It is not taken and not a normal "busy": somebody has to look at it.
+    /// </summary>
+    ImpossibleExpiry,
 }
 
 /// <summary>The result of trying to take an issuer's lock.</summary>
 /// <param name="State">What happened.</param>
 /// <param name="Lock">The lock, only when <paramref name="State"/> is <see cref="LockState.Acquired"/>.</param>
-/// <param name="HeldUntil">When the holder's lock expires, only when <paramref name="State"/> is <see cref="LockState.Held"/>.</param>
-public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, DateTimeOffset? HeldUntil = null);
+/// <param name="HeldUntil">
+/// When the holder's lock expires, only when <paramref name="State"/> is <see cref="LockState.Held"/> or
+/// <see cref="LockState.ImpossibleExpiry"/>.
+/// </param>
+/// <param name="Key">The key of the lock object, to tell the person which one to look at.</param>
+public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, DateTimeOffset? HeldUntil = null, string? Key = null);
+
+/// <summary>
+/// A conditional write failed and so did the read that checks whether it landed. The write's error is the
+/// one that matters (its type and message are in <see cref="WriteError"/>); the read's is the inner exception.
+/// </summary>
+public sealed class LockWriteException(string message, Exception writeError, Exception readError) : Exception(message, readError)
+{
+    /// <summary>The error of the original write.</summary>
+    public Exception WriteError { get; } = writeError;
+}
 
 /// <summary>
 /// A lock per issuer between sync runs, kept as one object in the bucket and taken with its conditional
@@ -36,7 +56,7 @@ public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, D
 /// Losing the lock does not lose records (the AEAT keeps every one), but it is not harmless: the chain head
 /// is read from the AEAT, so a run stalled past the time to live (there is no fencing token) can wake up and
 /// chain onto a head another run already used, until it renews and finds out. Expiry is judged on the
-/// reader's clock, so the hosts' clocks must be synchronized (NTP). A conditional write that
+/// reader's clock plus <see cref="ClockSkewMargin"/>, so the hosts' clocks must be synchronized (NTP). A conditional write that
 /// fails with an exception is ambiguous (the implementations never retry it), so the object is read back
 /// before deciding whether the write landed.
 /// </remarks>
@@ -48,6 +68,12 @@ public sealed class IssuerLock
     /// </summary>
     public const string KeyPrefix = "locks/";
 
+    /// <summary>
+    /// How far past its expiry a lock must be before another run takes it, so a clock a little behind
+    /// does not make two runs hold it at once. A released lock is exempt (see <see cref="ReleaseAsync"/>).
+    /// </summary>
+    public static readonly TimeSpan ClockSkewMargin = TimeSpan.FromSeconds(60);
+
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     readonly IObjectStore _store;
@@ -56,14 +82,18 @@ public sealed class IssuerLock
     readonly TimeProvider _clock;
     readonly string _owner;
     string _eTag;
+    DateTimeOffset _writtenAt;
+    DateTimeOffset _expiresAt;
 
-    IssuerLock(IObjectStore store, string key, TimeSpan timeToLive, TimeProvider clock, string owner, string eTag)
+    IssuerLock(IObjectStore store, string key, TimeSpan timeToLive, TimeProvider clock, LockRecord record, DateTimeOffset writtenAt, string eTag)
     {
         _store = store;
         _key = key;
         _timeToLive = timeToLive;
         _clock = clock;
-        _owner = owner;
+        _owner = record.Owner;
+        _expiresAt = record.ExpiresAt;
+        _writtenAt = writtenAt;
         _eTag = eTag;
     }
 
@@ -86,12 +116,13 @@ public sealed class IssuerLock
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeToLive, TimeSpan.Zero);
 
         var key = KeyFor(issuer);
-        var mine = new LockRecord(Guid.NewGuid().ToString("N"), clock.GetUtcNow() + timeToLive);
+        var writtenAt = clock.GetUtcNow();
+        var mine = new LockRecord(Guid.NewGuid().ToString("N"), writtenAt + timeToLive);
 
         var created = await WriteAsync(store, key, mine, eTag: null, cancellationToken);
         if (created.Written)
         {
-            return Acquired(store, key, timeToLive, clock, mine.Owner, created.ETag!);
+            return Acquired(store, key, timeToLive, clock, mine, writtenAt, created.ETag!);
         }
 
         var current = await store.GetAsync(key, cancellationToken);
@@ -102,24 +133,53 @@ public sealed class IssuerLock
         }
 
         var holder = Parse(current);
-        if (holder is not null && holder.ExpiresAt > clock.GetUtcNow())
+        if (holder is not null)
         {
-            return new LockAcquisition(LockState.Held, HeldUntil: holder.ExpiresAt);
+            var seen = Judge(holder, key, timeToLive, clock);
+            if (seen is not null)
+            {
+                return seen;
+            }
         }
 
         // Expired (or unreadable, which nobody is holding): take it over only if it is still the version just read.
         var takenOver = await WriteAsync(store, key, mine, current.ETag, cancellationToken);
         if (takenOver.Written)
         {
-            return Acquired(store, key, timeToLive, clock, mine.Owner, takenOver.ETag!);
+            return Acquired(store, key, timeToLive, clock, mine, writtenAt, takenOver.ETag!);
         }
 
         // Somebody else took it over first, or the service answered with a conflict: read to tell which.
         var winner = await store.GetAsync(key, cancellationToken);
         var winnerRecord = winner is null ? null : Parse(winner);
-        return winnerRecord is not null && winnerRecord.ExpiresAt > clock.GetUtcNow()
-            ? new LockAcquisition(LockState.Held, HeldUntil: winnerRecord.ExpiresAt)
-            : new LockAcquisition(LockState.Contended);
+        return (winnerRecord is null ? null : Judge(winnerRecord, key, timeToLive, clock))
+            ?? new LockAcquisition(LockState.Contended);
+    }
+
+    // Held (or impossible) when somebody else's lock has not yet expired by the margin; null when it can be taken.
+    static LockAcquisition? Judge(LockRecord holder, string key, TimeSpan timeToLive, TimeProvider clock)
+    {
+        var now = clock.GetUtcNow();
+        if (holder.ExpiresAt > now + timeToLive + ClockSkewMargin)
+        {
+            return new LockAcquisition(LockState.ImpossibleExpiry, HeldUntil: holder.ExpiresAt, Key: key);
+        }
+
+        return holder.ExpiresAt + ClockSkewMargin > now
+            ? new LockAcquisition(LockState.Held, HeldUntil: holder.ExpiresAt, Key: key)
+            : null;
+    }
+
+    /// <summary>
+    /// Renews the lock only when it is due: half the time to live has passed since the last write, or less
+    /// than <paramref name="minimumRemaining"/> is left (before a send, the longest wait for its answer).
+    /// Cheap to call at every step. Returns <c>false</c> when the lock is no longer ours.
+    /// </summary>
+    public async Task<bool> RenewIfDueAsync(TimeSpan minimumRemaining, CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow();
+        var due = now - _writtenAt >= _timeToLive / 2 || _expiresAt - now < minimumRemaining;
+        return !due || await RenewAsync(cancellationToken);
     }
 
     /// <summary>
@@ -128,11 +188,14 @@ public sealed class IssuerLock
     /// </summary>
     public async Task<bool> RenewAsync(CancellationToken cancellationToken = default)
     {
-        var renewed = new LockRecord(_owner, _clock.GetUtcNow() + _timeToLive);
+        var writtenAt = _clock.GetUtcNow();
+        var renewed = new LockRecord(_owner, writtenAt + _timeToLive);
         var outcome = await WriteAsync(_store, _key, renewed, _eTag, cancellationToken);
         if (outcome.Written)
         {
             _eTag = outcome.ETag!;
+            _writtenAt = writtenAt;
+            _expiresAt = renewed.ExpiresAt;
             return true;
         }
 
@@ -145,12 +208,13 @@ public sealed class IssuerLock
 
     /// <summary>
     /// Lets go of the lock by expiring it, only if it is still ours: an unconditional delete could remove the
-    /// lock of the run that took it over. A failure here is an error to report, not to hide, but it costs
+    /// lock of the run that took it over. The record is written as expired since the beginning of time, so
+    /// the next run does not wait for the clock skew margin. A failure here is an error to report, not to hide, but it costs
     /// nothing more than the time left before the lock expires on its own.
     /// </summary>
     public async Task ReleaseAsync(CancellationToken cancellationToken = default)
     {
-        var released = new LockRecord(_owner, _clock.GetUtcNow());
+        var released = new LockRecord(_owner, DateTimeOffset.MinValue);
         var outcome = await WriteAsync(_store, _key, released, _eTag, cancellationToken);
         if (outcome.Written)
         {
@@ -158,8 +222,8 @@ public sealed class IssuerLock
         }
     }
 
-    static LockAcquisition Acquired(IObjectStore store, string key, TimeSpan timeToLive, TimeProvider clock, string owner, string eTag) =>
-        new(LockState.Acquired, new IssuerLock(store, key, timeToLive, clock, owner, eTag));
+    static LockAcquisition Acquired(IObjectStore store, string key, TimeSpan timeToLive, TimeProvider clock, LockRecord record, DateTimeOffset writtenAt, string eTag) =>
+        new(LockState.Acquired, new IssuerLock(store, key, timeToLive, clock, record, writtenAt, eTag));
 
     // Writes the record, creating it when there is no ETag and replacing that version when there is one. A
     // failed write is read back: the record landing means the write won, whatever the response said.
@@ -174,9 +238,20 @@ public sealed class IssuerLock
                 : await store.PutIfUnchangedAsync(key, content, eTag, cancellationToken);
         }
         // The caller's own cancellation is not read back; an HTTP timeout (a cancellation it did not ask for) is.
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception writeError) when (!cancellationToken.IsCancellationRequested)
         {
-            var stored = await store.GetAsync(key, cancellationToken);
+            StoredObject? stored;
+            try
+            {
+                stored = await store.GetAsync(key, cancellationToken);
+            }
+            catch (Exception readError) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new LockWriteException(
+                    $"La escritura del cerrojo falló ({writeError.Message}) y tampoco se pudo leer para comprobar si llegó ({readError.Message}).",
+                    writeError, readError);
+            }
+
             if (stored is not null && Parse(stored) == record)
             {
                 return WriteOutcome.Success(stored.ETag);

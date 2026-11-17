@@ -24,7 +24,7 @@ public sealed class ShopifyStub : IDisposable
         GivenToken("read_orders");
     }
 
-    public HttpClient CreateClient() => new(new RedirectToStubHandler(new Uri(_server.Url!)));
+    public HttpClient CreateClient(Action? onRequest = null) => new(new RedirectToStubHandler(new Uri(_server.Url!), onRequest));
 
     public ShopifyStub GivenToken(string scope)
     {
