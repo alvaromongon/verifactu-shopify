@@ -32,8 +32,10 @@ public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, D
 /// release. The expiry is inside the object, so a run that dies leaves a lock that frees itself.
 /// </summary>
 /// <remarks>
-/// Losing the lock loses nothing else: the chain lives in the bucket and the AEAT keeps every record, the
-/// worst case is that two runs overlap until the first one renews and finds out. A conditional write that
+/// Losing the lock does not lose records (the AEAT keeps every one), but it is not harmless: the chain head
+/// is read from the AEAT, so a run stalled past the time to live (there is no fencing token) can wake up and
+/// chain onto a head another run already used, until it renews and finds out. Expiry is judged on the
+/// reader's clock, so the hosts' clocks must be synchronized (NTP). A conditional write that
 /// fails with an exception is ambiguous (the implementations never retry it), so the object is read back
 /// before deciding whether the write landed.
 /// </remarks>
@@ -127,13 +129,16 @@ public sealed class IssuerLock
     {
         var renewed = new LockRecord(_owner, _clock.GetUtcNow() + _timeToLive);
         var outcome = await WriteAsync(_store, _key, renewed, _eTag, cancellationToken);
-        if (!outcome.Written)
+        if (outcome.Written)
         {
-            return false;
+            _eTag = outcome.ETag!;
+            return true;
         }
 
-        _eTag = outcome.ETag!;
-        return true;
+        // A refused write is not always a lost lock: a 409 conflict leaves it untouched. Still ours and
+        // unchanged means we keep it (the next renewal will extend it).
+        var stored = await _store.GetAsync(_key, cancellationToken);
+        return stored is not null && stored.ETag == _eTag && Parse(stored)?.Owner == _owner;
     }
 
     /// <summary>
@@ -166,7 +171,8 @@ public sealed class IssuerLock
                 ? await store.PutIfAbsentAsync(key, content, cancellationToken)
                 : await store.PutIfUnchangedAsync(key, content, eTag, cancellationToken);
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        // The caller's own cancellation is not read back; an HTTP timeout (a cancellation it did not ask for) is.
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             var stored = await store.GetAsync(key, cancellationToken);
             if (stored is not null && Parse(stored) == record)
@@ -174,9 +180,9 @@ public sealed class IssuerLock
                 return WriteOutcome.Success(stored.ETag);
             }
 
-            // Another holder's lock is a lost condition; nothing there (or still the old version) means
-            // the write never landed and the failure is a real one.
-            if (stored is not null && Parse(stored) is { } other && other.Owner != record.Owner)
+            // Another holder's lock is a lost condition. Nothing there, or still the very version the write
+            // was conditioned on, means it never landed and the failure is a real one.
+            if (stored is not null && stored.ETag != eTag && Parse(stored) is { } other && other.Owner != record.Owner)
             {
                 return WriteOutcome.ConditionNotMet;
             }

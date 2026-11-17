@@ -73,7 +73,7 @@ public static class OrderSync
         {
             await held.ReleaseAsync();
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        catch (Exception error)
         {
             Console.WriteLine($"Cerrojo:     no se pudo soltar ({error.Message}); caducará solo en {LockTimeToLive.TotalMinutes:0} minutos como máximo");
         }

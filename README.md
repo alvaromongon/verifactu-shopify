@@ -168,7 +168,7 @@ dotnet run --project src/VerifactuShopify -- sincronizar
 
 ## Sincronización con Shopify
 
-`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez para el mismo emisor: lo impide el [cerrojo](#cerrojo-entre-ejecuciones). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
+`sincronizar` lee los pedidos pagados de la tienda y envía a la AEAT un registro por cada uno que aún no lo tenga. No sustituye a la facturación de la tienda: por ahora solo va a preproducción. Cada ejecución hace una sola pasada. Lo previsto es lanzarla cada pocos minutos, con un cronjob o similar, y nunca dos a la vez para el mismo emisor: lo impide el [cerrojo](#cerrojo-entre-ejecuciones) (hasta que [#55](https://github.com/alvaromongon/verifactu-shopify/issues/55) enlace el bucket, solo lo impiden `concurrencyPolicy: Forbid` o `flock`). El diseño está en [#4](https://github.com/alvaromongon/verifactu-shopify/issues/4).
 
 ### App de Shopify
 
@@ -225,7 +225,8 @@ Dos ejecuciones a la vez para el mismo emisor encadenarían sobre la misma cabez
 - **Si está ocupado**: la pasada no envía nada, lo dice en la salida (`Cerrojo: ocupado por otra ejecución hasta …`) y termina con 0, porque no es un fallo.
 - **Conflicto al adquirirlo**: S3 puede contestar 409 `ConditionalRequestConflict` a dos escrituras simultáneas sin que ninguna haya ganado todavía. Se trata como ocupado: la pasada se salta, lo dice en la salida (`Cerrojo: conflicto al adquirirlo …`, distinto de un error) y la siguiente lo reintenta.
 - **Tras un error de red en una escritura**, el cerrojo lee el objeto de vuelta antes de decidir si llegó, y no lo da por ganado ni por perdido a ciegas.
-- **Si se pierde, no se pierde nada más**: la cadena sigue en el bucket y la AEAT conserva los registros. Lo peor es que dos pasadas se solapen hasta que la primera renueve y se entere.
+- **Si se pierde, no se pierden registros, pero no es inocuo**: la cabeza de la cadena se lee de la AEAT, así que una pasada detenida más allá de los 10 minutos (no hay *fencing token*) puede despertar y encadenar sobre una cabeza que otra ya usó, hasta que renueve y se entere.
+- **Relojes sincronizados**: la caducidad la juzga el reloj de quien lee el cerrojo, así que los equipos deben estar sincronizados (NTP).
 - **Sin bucket configurado** el cerrojo no se usa y la salida lo dice (`Cerrojo: sin almacén configurado …`). Enlazar el bucket con la configuración es [#55](https://github.com/alvaromongon/verifactu-shopify/issues/55).
 
 ### Códigos de salida

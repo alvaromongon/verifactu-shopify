@@ -218,4 +218,86 @@ public sealed class IssuerLockTests
 
         await Assert.ThrowsAsync<HttpRequestException>(() => held.RenewAsync(Ct));
     }
+
+    [Fact]
+    public async Task A_failed_write_on_taking_over_an_expired_lock_is_an_error_not_a_skip()
+    {
+        await AcquireAsync();
+        _clock.Advance(Ttl);
+        var store = new FaultyObjectStore(_store);
+        store.FailNextReplace(Fault.Failure);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => AcquireAsync(store));
+    }
+
+    [Fact]
+    public async Task A_failed_write_on_taking_over_a_released_lock_is_an_error_not_a_skip()
+    {
+        var first = (await AcquireAsync()).Lock!;
+        await first.ReleaseAsync(Ct);
+        var store = new FaultyObjectStore(_store);
+        store.FailNextReplace(Fault.Failure);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => AcquireAsync(store));
+    }
+
+    [Fact]
+    public async Task A_lost_response_on_taking_over_an_expired_lock_is_read_back_and_the_lock_counts_as_won()
+    {
+        await AcquireAsync();
+        _clock.Advance(Ttl);
+        var store = new FaultyObjectStore(_store);
+        store.FailNextReplace(Fault.LostResponse);
+
+        var attempt = await AcquireAsync(store);
+
+        Assert.Equal(LockState.Acquired, attempt.State);
+    }
+
+    [Fact]
+    public async Task A_conflict_on_renewing_a_lock_that_is_still_ours_keeps_it()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        store.FailNextReplace(Fault.Conflict);
+
+        Assert.True(await held.RenewAsync(Ct));
+        Assert.True(await held.RenewAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_conflict_on_renewing_a_lock_taken_over_by_another_run_loses_it()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(Ttl);
+        await AcquireAsync();
+        store.FailNextReplace(Fault.Conflict);
+
+        Assert.False(await held.RenewAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_timeout_on_renewing_is_read_back_like_any_other_failure()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        store.FailNextReplace(Fault.TimeoutAfterWrite);
+
+        Assert.True(await held.RenewAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_cancelled_write_is_not_read_back()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        store.FailNextReplace(Fault.CancelledAfterWrite);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => held.RenewAsync(cancelled.Token));
+    }
 }
