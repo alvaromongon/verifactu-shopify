@@ -75,7 +75,7 @@ src/VerifactuShopify/
   Configuration/  lectura de la configuración y cultura del proceso
   Invoicing/      regla de facturación, serie y mapeo de pedido a factura
   Shopify/        cliente GraphQL de Shopify y lectura de sus pedidos
-  Storage/        almacenamiento de objetos (S3 y compatibles) con escrituras condicionales; solo lo usa el cerrojo, y aún no desde el host
+  Storage/        almacenamiento de objetos (S3 y compatibles, Azure Blob) con escrituras condicionales; solo lo usa el cerrojo, y aún no desde el host
   Sync/           una pasada de la sincronización, su configuración y el cerrojo por emisor
   Program.cs      comandos de la línea de comandos
 docs/
@@ -228,6 +228,15 @@ Dos ejecuciones a la vez para el mismo emisor encadenarían sobre la misma cabez
 - **Si se pierde, no se pierden registros, pero no es inocuo**: la cabeza de la cadena se lee de la AEAT, así que una pasada detenida más allá de los 10 minutos (no hay *fencing token*) puede despertar y encadenar sobre una cabeza que otra ya usó, hasta que renueve y se entere.
 - **Relojes sincronizados**: la caducidad la juzga el reloj de quien lee el cerrojo, así que los equipos deben estar sincronizados (NTP).
 - **Sin bucket configurado** el cerrojo no se usa y la salida lo dice (`Cerrojo: sin almacén configurado …`). Enlazar el bucket con la configuración es [#55](https://github.com/alvaromongon/verifactu-shopify/issues/55).
+
+### Almacenamiento de objetos
+
+El cerrojo (y, más adelante, el estado de la cadena) vive en un almacenamiento de objetos con escrituras condicionales. Hay dos implementaciones de la misma interfaz (`IObjectStore`), y las dos pasan los mismos tests de contrato contra un doble HTTP sobre WireMock, sin emuladores ni Docker:
+
+- **S3 y compatibles** (`S3ObjectStore`): las credenciales salen de la cadena estándar del SDK de AWS (variables `AWS_*`, perfil, rol).
+- **Azure Blob** (`AzureBlobObjectStore`): se indica la URL de la cuenta (`https://<cuenta>.blob.core.windows.net`) y el contenedor. Las credenciales salen de `DefaultAzureCredential` (SDK `Azure.Identity`): identidad gestionada en Azure y en AKS con *workload identity*, o las variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_CLIENT_SECRET` (o `AZURE_CLIENT_CERTIFICATE_PATH`) fuera de Azure. La identidad necesita el rol *Storage Blob Data Contributor* sobre el contenedor. Nunca se leen de la configuración ni se usan claves de cuenta.
+
+Las condiciones son las mismas en los dos: `If-None-Match: *` para crear si no existe e `If-Match` con el ETag para sustituir si no ha cambiado; en Blob no se usa *lease*. Una condición no cumplida es un resultado normal; un fallo de red, de servicio o de credenciales es una excepción. Una escritura condicional no se reintenta dentro del SDK, porque repetir una escritura cuya respuesta se perdió se contestaría como condición no cumplida aunque la hiciera este mismo llamador; el cerrojo lee el objeto de vuelta para resolver ese caso. Elegir el proveedor desde la configuración del host es [#55](https://github.com/alvaromongon/verifactu-shopify/issues/55).
 
 ### Códigos de salida
 
