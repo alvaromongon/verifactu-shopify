@@ -32,14 +32,15 @@ public enum LockState
 /// <param name="Lock">The lock, only when <paramref name="State"/> is <see cref="LockState.Acquired"/>.</param>
 /// <param name="HeldUntil">
 /// When the holder's lock expires, only when <paramref name="State"/> is <see cref="LockState.Held"/> or
-/// <see cref="LockState.ImpossibleExpiry"/>.
+/// <see cref="LockState.ImpossibleExpiry"/>. A held lock that expired less than the clock skew margin ago
+/// shows when the margin ends (when it can be taken), never a moment in the past.
 /// </param>
-/// <param name="Key">The key of the lock object, to tell the person which one to look at.</param>
-public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, DateTimeOffset? HeldUntil = null, string? Key = null);
+public sealed record LockAcquisition(LockState State, IssuerLock? Lock = null, DateTimeOffset? HeldUntil = null);
 
 /// <summary>
 /// A conditional write failed and so did the read that checks whether it landed. The write's error is the
-/// one that matters, so it is the inner exception; the read's is in <see cref="ReadError"/>. It is an
+/// one that matters, so it is the inner exception; the read's is in <see cref="ReadError"/> and in the
+/// message, so a host that prints the chain of messages shows each error once. It is an
 /// <see cref="InvalidOperationException"/> so the host reports it and exits with 1 instead of crashing.
 /// </summary>
 public sealed class LockWriteException(string message, Exception writeError, Exception readError) : InvalidOperationException(message, writeError)
@@ -84,7 +85,6 @@ public sealed class IssuerLock
     readonly string _owner;
     string _eTag;
     DateTimeOffset _writtenAt;
-    DateTimeOffset _expiresAt;
 
     IssuerLock(IObjectStore store, string key, TimeSpan timeToLive, TimeProvider clock, LockRecord record, DateTimeOffset writtenAt, string eTag)
     {
@@ -93,7 +93,6 @@ public sealed class IssuerLock
         _timeToLive = timeToLive;
         _clock = clock;
         _owner = record.Owner;
-        _expiresAt = record.ExpiresAt;
         _writtenAt = writtenAt;
         _eTag = eTag;
     }
@@ -136,7 +135,7 @@ public sealed class IssuerLock
         var holder = Parse(current);
         if (holder is not null)
         {
-            var seen = Judge(holder, key, timeToLive, clock);
+            var seen = Judge(holder, timeToLive, clock);
             if (seen is not null)
             {
                 return seen;
@@ -153,41 +152,50 @@ public sealed class IssuerLock
         // Somebody else took it over first, or the service answered with a conflict: read to tell which.
         var winner = await store.GetAsync(key, cancellationToken);
         var winnerRecord = winner is null ? null : Parse(winner);
-        return (winnerRecord is null ? null : Judge(winnerRecord, key, timeToLive, clock))
+        return (winnerRecord is null ? null : Judge(winnerRecord, timeToLive, clock))
             ?? new LockAcquisition(LockState.Contended);
     }
 
     // Held (or impossible) when somebody else's lock has not yet expired by the margin; null when it can be taken.
-    static LockAcquisition? Judge(LockRecord holder, string key, TimeSpan timeToLive, TimeProvider clock)
+    static LockAcquisition? Judge(LockRecord holder, TimeSpan timeToLive, TimeProvider clock)
     {
         var now = clock.GetUtcNow();
         if (holder.ExpiresAt > now + timeToLive + ClockSkewMargin)
         {
-            return new LockAcquisition(LockState.ImpossibleExpiry, HeldUntil: holder.ExpiresAt, Key: key);
+            return new LockAcquisition(LockState.ImpossibleExpiry, HeldUntil: holder.ExpiresAt);
         }
 
+        // Expired but inside the margin: it cannot be taken yet, so say when it can instead of a past instant.
         return holder.ExpiresAt + ClockSkewMargin > now
-            ? new LockAcquisition(LockState.Held, HeldUntil: holder.ExpiresAt, Key: key)
+            ? new LockAcquisition(LockState.Held, HeldUntil: holder.ExpiresAt > now ? holder.ExpiresAt : holder.ExpiresAt + ClockSkewMargin)
             : null;
     }
 
     /// <summary>
-    /// Renews the lock only when it is due: half the time to live has passed since the last write, or less
-    /// than <paramref name="minimumRemaining"/> is left (before a send, the longest wait for its answer).
-    /// Cheap to call at every step. Returns <c>false</c> when the lock is no longer ours.
+    /// Renews the lock only when it is due: half the time to live has passed since the last write. Cheap to
+    /// call at every step. Returns <c>false</c> when the lock is no longer ours, or when it could not be
+    /// extended and less than <paramref name="minimumRemaining"/> is left (before a send, the longest wait
+    /// for its answer). That minimum can be at most half the time to live: until then a lock that is not due
+    /// still has at least that much left, so no write is needed just for it.
     /// </summary>
     public async Task<bool> RenewIfDueAsync(TimeSpan minimumRemaining, CancellationToken cancellationToken = default)
     {
-        var now = _clock.GetUtcNow();
-        var due = now - _writtenAt >= _timeToLive / 2 || _expiresAt - now < minimumRemaining;
-        return !due || await RenewAsync(cancellationToken);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minimumRemaining, _timeToLive / 2);
+        var due = _clock.GetUtcNow() - _writtenAt >= _timeToLive / 2;
+        return !due || await RenewAsync(minimumRemaining, cancellationToken);
     }
 
     /// <summary>
     /// Pushes the expiry forward. Returns <c>false</c> when the lock is no longer ours (it expired and another
     /// run took it over): the caller must stop sending.
     /// </summary>
-    public async Task<bool> RenewAsync(CancellationToken cancellationToken = default)
+    public Task<bool> RenewAsync(CancellationToken cancellationToken = default) => RenewAsync(TimeSpan.Zero, cancellationToken);
+
+    /// <summary>
+    /// Like <see cref="RenewAsync(CancellationToken)"/>, and also <c>false</c> when the write was refused with a
+    /// conflict and the lock, still ours, has less than <paramref name="minimumRemaining"/> left.
+    /// </summary>
+    public async Task<bool> RenewAsync(TimeSpan minimumRemaining, CancellationToken cancellationToken)
     {
         var writtenAt = _clock.GetUtcNow();
         var renewed = new LockRecord(_owner, writtenAt + _timeToLive);
@@ -196,15 +204,20 @@ public sealed class IssuerLock
         {
             _eTag = outcome.ETag!;
             _writtenAt = writtenAt;
-            _expiresAt = renewed.ExpiresAt;
             return true;
         }
 
-        // A refused write is not always a lost lock: a 409 conflict leaves it untouched. Still ours and
-        // unchanged means we keep it (the next renewal will extend it).
+        // A refused write is not always a lost lock: a 409 conflict leaves it untouched. Still ours, unchanged
+        // and with enough time left means we keep it (the next renewal will extend it); with less, the
+        // caller could start a send that outlives it.
         var stored = await _store.GetAsync(_key, cancellationToken);
-        return stored is not null && stored.ETag == _eTag
-            && Parse(stored) is { } record && record.Owner == _owner && record.ExpiresAt > _clock.GetUtcNow();
+        if (stored is null || stored.ETag != _eTag || Parse(stored) is not { } record || record.Owner != _owner)
+        {
+            return false;
+        }
+
+        var remaining = record.ExpiresAt - _clock.GetUtcNow();
+        return remaining > TimeSpan.Zero && remaining >= minimumRemaining;
     }
 
     /// <summary>
@@ -249,7 +262,7 @@ public sealed class IssuerLock
             catch (Exception readError) when (!cancellationToken.IsCancellationRequested)
             {
                 throw new LockWriteException(
-                    $"La escritura del cerrojo falló ({writeError.Message}) y tampoco se pudo leer para comprobar si llegó ({readError.Message}).",
+                    $"La escritura del cerrojo falló y tampoco se pudo leer para comprobar si llegó ({readError.Message}).",
                     writeError, readError);
             }
 

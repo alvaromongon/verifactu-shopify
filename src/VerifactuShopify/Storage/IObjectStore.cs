@@ -18,6 +18,10 @@ public readonly record struct WriteOutcome(bool Written, string? ETag)
 }
 
 /// <summary>Minimal object storage: what a lock and a synced folder need, the same on every provider.</summary>
+/// <remarks>
+/// The content passed to a write is not copied when it can be avoided: the caller must not modify it until
+/// the returned task completes.
+/// </remarks>
 public interface IObjectStore
 {
     /// <summary>Reads an object, or returns <c>null</c> when it does not exist.</summary>
@@ -32,6 +36,7 @@ public interface IObjectStore
     /// <summary>
     /// Replaces the object only when its ETag is still <paramref name="eTag"/> (<c>If-Match</c>). A null or
     /// empty ETag is an <see cref="ArgumentException"/>: it would be an unconditional write on some providers.
+    /// So is the wildcard <c>*</c> (also quoted): <c>If-Match: *</c> overwrites whatever exists.
     /// </summary>
     Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default);
 

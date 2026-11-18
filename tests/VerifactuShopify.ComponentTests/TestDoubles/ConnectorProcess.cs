@@ -23,8 +23,9 @@ public static class ConnectorProcess
         try
         {
             // The compiler wraps the async top-level statements in a synchronous Main.
-            var (exitCode, output, error) = ConsoleCapture.Run(() => (int)entryPoint.Invoke(null, [args])!);
-            return new Result(exitCode, output, error);
+            using var console = new ConsoleCapture();
+            var exitCode = (int)entryPoint.Invoke(null, [args])!;
+            return new Result(exitCode, console.Output, console.Error);
         }
         finally
         {

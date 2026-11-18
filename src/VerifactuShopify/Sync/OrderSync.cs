@@ -56,7 +56,7 @@ public static class OrderSync
                 return Success;
             case LockState.ImpossibleExpiry:
                 Console.WriteLine(
-                    $"Cerrojo:     el objeto '{attempt.Key}' caduca el {attempt.HeldUntil:O}, más lejos de lo posible (como mucho {LockTimeToLive.TotalMinutes:0} minutos " +
+                    $"Cerrojo:     el objeto '{IssuerLock.KeyFor(sellerNif)}' caduca el {attempt.HeldUntil:O}, más lejos de lo posible (como mucho {LockTimeToLive.TotalMinutes:0} minutos " +
                     $"más {IssuerLock.ClockSkewMargin.TotalSeconds:0} s); no se toma. Revisa el reloj de los equipos o expíralo a mano.");
                 return Failure;
             case LockState.Contended:
@@ -84,7 +84,7 @@ public static class OrderSync
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            Console.WriteLine($"Cerrojo:     no se pudo soltar ({error.Message}); otra ejecución podrá tomarlo pasados {LockTimeToLive.TotalMinutes:0} minutos más {IssuerLock.ClockSkewMargin.TotalSeconds:0} s de margen como máximo");
+            Console.WriteLine($"Cerrojo:     no se pudo soltar ({error}); otra ejecución podrá tomarlo pasados {LockTimeToLive.TotalMinutes:0} minutos más {IssuerLock.ClockSkewMargin.TotalSeconds:0} s de margen como máximo");
         }
     }
 

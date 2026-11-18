@@ -1,4 +1,5 @@
 using Azure;
+using Azure.Identity;
 using Azure.Storage;
 
 using VerifactuShopify.ComponentTests.TestDoubles;
@@ -183,8 +184,41 @@ public sealed class AzureBlobObjectStoreTests : ObjectStoreContractTests, IDispo
     [Fact]
     public void The_production_credential_is_the_sdk_default_chain()
     {
-        var store = AzureBlobObjectStore.Create(new AzureBlobObjectStoreOptions(new Uri("https://account.blob.core.windows.net"), AzureBlobStub.Container));
+        Assert.IsType<DefaultAzureCredential>(AzureBlobObjectStore.DefaultCredential());
+        Assert.NotNull(AzureBlobObjectStore.Create(new AzureBlobObjectStoreOptions(new Uri("https://account.blob.core.windows.net"), AzureBlobStub.Container)));
+    }
 
-        Assert.NotNull(store);
+    [Fact]
+    public async Task A_conditional_replace_of_a_missing_blob_is_answered_with_a_404_and_is_a_condition_not_met()
+    {
+        var outcome = await Store.PutIfUnchangedAsync("lock", Bytes("v"), "\"abc\"", Ct);
+
+        Assert.Equal(WriteOutcome.ConditionNotMet, outcome);
+        var put = Assert.Single(_blob.Requests, request => request.Method == "PUT");
+        Assert.Equal("\"abc\"", put.Headers["If-Match"]);
+        Assert.Null(await Store.GetAsync("lock", Ct));
+    }
+
+    [Fact]
+    public async Task Deleting_in_a_missing_container_is_an_error_not_a_missing_blob()
+    {
+        _blob.FailWith(404, "ContainerNotFound");
+
+        var error = await Assert.ThrowsAsync<RequestFailedException>(() => Store.DeleteAsync("one.txt", Ct));
+
+        Assert.Equal("ContainerNotFound", error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_trailing_slash_on_the_service_uri_does_not_change_where_blobs_go()
+    {
+        var store = AzureBlobObjectStore.Create(
+            new AzureBlobObjectStoreOptions(new Uri($"{_blob.ServiceUri}/"), AzureBlobStub.Container),
+            new StorageSharedKeyCredential(AzureBlobStub.Account, Convert.ToBase64String("test-key"u8)));
+
+        await store.PutAsync("a/one.txt", Bytes("x"), Ct);
+
+        var put = Assert.Single(_blob.Requests, request => request.Method == "PUT");
+        Assert.Equal($"/{AzureBlobStub.Account}/{AzureBlobStub.Container}/a/one.txt", put.Path);
     }
 }

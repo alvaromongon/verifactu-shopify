@@ -7,6 +7,7 @@ using VeriFactu.Config;
 using VeriFactu.Net;
 
 using VerifactuShopify.Aeat;
+using VerifactuShopify.ComponentTests.TestDoubles;
 using VerifactuShopify.UnitTests.TestDoubles;
 
 namespace VerifactuShopify.UnitTests.Aeat;
@@ -122,40 +123,26 @@ public sealed class CertificateSetupTests : IDisposable
     public void Warns_before_the_certificate_expires()
     {
         var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(CertificateSetup.WarningDays - 1));
-        var error = new StringWriter();
-        var original = Console.Error;
-        Console.SetError(error);
+        using var console = new ConsoleCapture();
 
-        try
+        using (CertificateSetup.Configure(Configuration(path, Password)))
         {
-            using var certificate = CertificateSetup.Configure(Configuration(path, Password));
-        }
-        finally
-        {
-            Console.SetError(original);
         }
 
-        Assert.Contains("caduca el", error.ToString());
+        Assert.Contains("caduca el", console.Error, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Does_not_warn_for_a_certificate_with_time_left()
     {
         var path = CreatePfx(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(CertificateSetup.WarningDays + 30));
-        var error = new StringWriter();
-        var original = Console.Error;
-        Console.SetError(error);
+        using var console = new ConsoleCapture();
 
-        try
+        using (CertificateSetup.Configure(Configuration(path, Password)))
         {
-            using var certificate = CertificateSetup.Configure(Configuration(path, Password));
-        }
-        finally
-        {
-            Console.SetError(original);
         }
 
-        Assert.Equal("", error.ToString());
+        Assert.Equal("", console.Error);
     }
 
     [Fact]
