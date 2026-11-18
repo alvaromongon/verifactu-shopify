@@ -17,10 +17,15 @@ namespace VerifactuShopify.ComponentTests.TestDoubles;
 public sealed class S3Stub : IDisposable
 {
     public const string Bucket = "chain-state";
+
+    // What every error response says its request id is, to check it reaches the logs.
+    public const string RequestId = "stub-request-1";
+
     const int PageSize = 10;
 
     readonly WireMockServer _server = WireMockServer.Start();
     readonly Lock _gate = new();
+    readonly InjectedFailure _failure = new();
     readonly SortedDictionary<string, (byte[] Content, string ETag)> _objects = new(StringComparer.Ordinal);
 
     public S3Stub() =>
@@ -30,26 +35,16 @@ public sealed class S3Stub : IDisposable
     public string Url => _server.Url!;
 
     // Every request the stub received, in order.
-    public IReadOnlyList<(string Method, string Path, IReadOnlyDictionary<string, string> Headers)> Requests =>
-        [.. _server.LogEntries.Select(entry => (
-            entry.RequestMessage!.Method,
-            entry.RequestMessage.Path,
-            (entry.RequestMessage.Headers ?? new Dictionary<string, WireMock.Types.WireMockList<string>>())
-                .ToDictionary(header => header.Key, header => header.Value[0], StringComparer.OrdinalIgnoreCase)))];
+    public IReadOnlyList<RecordedRequest> Requests => HttpStubSupport.RequestsOf(_server);
 
     // Every response from now on is this S3 error instead (until the stub is disposed): an outage, a
     // refused credential or a missing bucket.
     public S3Stub FailWith(int status, string code)
     {
-        lock (_gate)
-        {
-            _failure = (status, code);
-        }
+        _failure.Set(status, code);
 
         return this;
     }
-
-    (int Status, string Code)? _failure;
 
     // Listings come back in reverse key order, as a provider that does not sort would.
     public S3Stub ListInReverseOrder()
@@ -82,7 +77,7 @@ public sealed class S3Stub : IDisposable
     {
         lock (_gate)
         {
-            if (_failure is { } failure)
+            if (_failure.Current is { } failure)
             {
                 return Error(failure.Status, failure.Code);
             }
@@ -111,12 +106,12 @@ public sealed class S3Stub : IDisposable
     {
         var exists = _objects.TryGetValue(key, out var current);
 
-        if (Header(request, "If-None-Match") == "*" && exists)
+        if (HttpStubSupport.Header(request, "If-None-Match") == "*" && exists)
         {
             return Error((int)HttpStatusCode.PreconditionFailed, "PreconditionFailed");
         }
 
-        if (Header(request, "If-Match") is { } expected && (!exists || current.ETag != expected))
+        if (HttpStubSupport.Header(request, "If-Match") is { } expected && (!exists || current.ETag != expected))
         {
             return exists
                 ? Error((int)HttpStatusCode.PreconditionFailed, "PreconditionFailed")
@@ -124,7 +119,7 @@ public sealed class S3Stub : IDisposable
         }
 
         var content = request.BodyData?.BodyAsBytes ?? [];
-        if (Header(request, "x-amz-content-sha256")?.StartsWith("STREAMING-", StringComparison.Ordinal) == true)
+        if (HttpStubSupport.Header(request, "x-amz-content-sha256")?.StartsWith("STREAMING-", StringComparison.Ordinal) == true)
         {
             content = DecodeChunks(content);
         }
@@ -142,9 +137,9 @@ public sealed class S3Stub : IDisposable
 
     WireMock.ResponseMessage List(WireMock.IRequestMessage request)
     {
-        var prefix = Query(request, "prefix") ?? string.Empty;
-        var after = Query(request, "continuation-token");
-        var urlEncoded = Query(request, "encoding-type") == "url";
+        var prefix = HttpStubSupport.Query(request, "prefix") ?? string.Empty;
+        var after = HttpStubSupport.Query(request, "continuation-token");
+        var urlEncoded = HttpStubSupport.Query(request, "encoding-type") == "url";
 
         var matching = _objects.Keys
             .Where(key => key.StartsWith(prefix, StringComparison.Ordinal))
@@ -201,16 +196,17 @@ public sealed class S3Stub : IDisposable
     static string ListHeader(int count, bool truncated) =>
         $"<Name>{Bucket}</Name><KeyCount>{count}</KeyCount><MaxKeys>{PageSize}</MaxKeys><IsTruncated>{(truncated ? "true" : "false")}</IsTruncated>";
 
-    static string? Header(WireMock.IRequestMessage request, string name) =>
-        request.Headers?.FirstOrDefault(header => string.Equals(header.Key, name, StringComparison.OrdinalIgnoreCase)).Value?[0];
-
-    static string? Query(WireMock.IRequestMessage request, string name) =>
-        request.Query?.FirstOrDefault(parameter => string.Equals(parameter.Key, name, StringComparison.Ordinal)).Value?[0];
-
     // An empty code is an error response without a body, as some compatible providers send.
-    static WireMock.ResponseMessage Error(int status, string code) =>
-        code.Length == 0 ? Response((HttpStatusCode)status, [], null, null) : Response((HttpStatusCode)status, Encoding.UTF8.GetBytes(
-            $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>{code}</Code><Message>{code}</Message></Error>"), "application/xml", null);
+    static WireMock.ResponseMessage Error(int status, string code)
+    {
+        if (code.Length == 0)
+        {
+            return Response((HttpStatusCode)status, [], null, null);
+        }
+
+        var body = $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>{code}</Code><Message>{code}</Message><RequestId>{RequestId}</RequestId></Error>";
+        return Response((HttpStatusCode)status, Encoding.UTF8.GetBytes(body), "application/xml", null);
+    }
 
     static WireMock.ResponseMessage Response(HttpStatusCode status, byte[] body, string? contentType, string? eTag)
     {

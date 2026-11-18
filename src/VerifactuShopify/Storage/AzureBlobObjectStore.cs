@@ -44,9 +44,12 @@ public sealed class AzureBlobObjectStore : IObjectStore
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        credential ??= new DefaultAzureCredential();
+        credential ??= DefaultCredential();
         return Create(options, (uri, clientOptions) => new BlobContainerClient(uri, credential, clientOptions));
     }
+
+    /// <summary>The credential a deployment uses: the SDK's default chain.</summary>
+    public static TokenCredential DefaultCredential() => new DefaultAzureCredential();
 
     /// <summary>Builds a store that signs with an account key: for emulators and tests, never from configuration.</summary>
     public static AzureBlobObjectStore Create(AzureBlobObjectStoreOptions options, StorageSharedKeyCredential credential)
@@ -59,7 +62,7 @@ public sealed class AzureBlobObjectStore : IObjectStore
 
     static AzureBlobObjectStore Create(AzureBlobObjectStoreOptions options, Func<Uri, BlobClientOptions, BlobContainerClient> newClient)
     {
-        var uri = new Uri($"{options.ServiceUri.AbsoluteUri.TrimEnd('/')}/{options.Container}");
+        var uri = new BlobUriBuilder(options.ServiceUri) { BlobContainerName = options.Container }.ToUri();
         var conditionalOptions = new BlobClientOptions();
         conditionalOptions.Retry.MaxRetries = 0;
 
@@ -92,12 +95,23 @@ public sealed class AzureBlobObjectStore : IObjectStore
 
     public Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(eTag);
+        ETagCondition.Require(eTag);
         return PutConditionalAsync(key, content, new BlobRequestConditions { IfMatch = new ETag(eTag) }, cancellationToken);
     }
 
-    public async Task DeleteAsync(string key, CancellationToken cancellationToken = default) =>
-        await _container.GetBlobClient(key).DeleteIfExistsAsync(cancellationToken: cancellationToken);
+    public async Task DeleteAsync(string key, CancellationToken cancellationToken = default)
+    {
+        // Not DeleteIfExists: it answers false for a missing container too, hiding a configuration error.
+        try
+        {
+            await _container.GetBlobClient(key).DeleteAsync(cancellationToken: cancellationToken);
+        }
+        catch (RequestFailedException error) when (error.Status == 404 && error.ErrorCode == BlobErrorCode.BlobNotFound)
+        {
+            // Deleting a missing blob is a success: the key is already gone.
+            return;
+        }
+    }
 
     public async Task<IReadOnlyList<string>> ListAsync(string prefix, CancellationToken cancellationToken = default)
     {

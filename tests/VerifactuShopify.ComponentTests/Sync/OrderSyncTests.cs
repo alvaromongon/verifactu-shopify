@@ -194,7 +194,9 @@ public sealed class OrderSyncTests : IDisposable
         _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
         await AnotherRunHoldsTheLockAsync(SellerNif);
 
-        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks));
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks);
+        var output = console.Output;
 
         Assert.Equal(OrderSync.Success, exitCode);
         Assert.Contains("ocupado por otra ejecución", output, StringComparison.Ordinal);
@@ -262,7 +264,8 @@ public sealed class OrderSyncTests : IDisposable
         // The listing passes its check; the run stalls while Shopify answers the order and another run takes the lock.
         var requests = 0;
 
-        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
         {
             if (++requests != 3)
             {
@@ -271,7 +274,8 @@ public sealed class OrderSyncTests : IDisposable
 
             _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
             AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
-        }));
+        });
+        var output = console.Output;
 
         Assert.True(requests >= 3);
         Assert.Equal(OrderSync.Failure, exitCode);
@@ -288,7 +292,8 @@ public sealed class OrderSyncTests : IDisposable
         // The run stalls past the expiry while Shopify answers, and another run takes the lock.
         var stalled = false;
 
-        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
         {
             if (stalled)
             {
@@ -298,7 +303,8 @@ public sealed class OrderSyncTests : IDisposable
             stalled = true;
             _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
             AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
-        }));
+        });
+        var output = console.Output;
 
         Assert.Equal(OrderSync.Failure, exitCode);
         Assert.Empty(_aeat.Altas());
@@ -334,13 +340,32 @@ public sealed class OrderSyncTests : IDisposable
         var year = $$"""{"owner":"someone","expiresAt":"{{_clock.GetUtcNow().AddYears(1):O}}"}""";
         await _locks.PutAsync(IssuerLock.KeyFor(SellerNif), System.Text.Encoding.UTF8.GetBytes(year), TestContext.Current.CancellationToken);
 
-        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks));
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks);
+        var output = console.Output;
 
         Assert.Equal(OrderSync.Failure, exitCode);
         Assert.Contains(IssuerLock.KeyFor(SellerNif), output, StringComparison.Ordinal);
         Assert.Contains("reloj", output, StringComparison.Ordinal);
         Assert.Empty(_aeat.Altas());
         Assert.Equal(0, _aeat.Consultas());
+    }
+
+    [Fact]
+    public async Task A_failed_release_logs_the_whole_exception_and_does_not_change_how_the_run_ended()
+    {
+        const string SellerNif = "00000029J";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        var locks = new FaultyObjectStore(_locks);
+        locks.FailNextReplace(Fault.Failure);
+
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: locks);
+        var output = console.Output;
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Contains("no se pudo soltar", output, StringComparison.Ordinal);
+        Assert.Contains("System.Net.Http.HttpRequestException: The service is unavailable.", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -351,7 +376,9 @@ public sealed class OrderSyncTests : IDisposable
         var locks = new FaultyObjectStore(_locks);
         locks.FailNextConditionalWrite(Fault.Conflict);
 
-        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: locks));
+        using var console = new ConsoleCapture();
+        var exitCode = await RunAsync(SellerNif, lockStore: locks);
+        var output = console.Output;
 
         Assert.Equal(OrderSync.Success, exitCode);
         Assert.Contains("conflicto al adquirirlo", output, StringComparison.Ordinal);

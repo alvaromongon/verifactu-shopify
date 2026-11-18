@@ -35,6 +35,11 @@ public sealed class InMemoryObjectStore : IObjectStore
     public Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(eTag);
+        if (eTag is "*" or "\"*\"")
+        {
+            throw new ArgumentException("The wildcard is not the ETag of a version.", nameof(eTag));
+        }
+
         lock (_gate)
         {
             var unchanged = _objects.TryGetValue(key, out var current) && current.ETag == eTag;

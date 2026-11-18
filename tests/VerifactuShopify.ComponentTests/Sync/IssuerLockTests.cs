@@ -82,6 +82,20 @@ public sealed class IssuerLockTests
     }
 
     [Fact]
+    public async Task A_lock_expired_within_the_clock_skew_margin_is_held_until_the_margin_ends_not_until_a_past_instant()
+    {
+        await AcquireAsync();
+        var expiry = _clock.GetUtcNow() + Ttl;
+        _clock.Advance(Ttl + TimeSpan.FromSeconds(30));
+
+        var attempt = await AcquireAsync();
+
+        Assert.Equal(LockState.Held, attempt.State);
+        Assert.Equal(expiry + IssuerLock.ClockSkewMargin, attempt.HeldUntil);
+        Assert.True(attempt.HeldUntil > _clock.GetUtcNow());
+    }
+
+    [Fact]
     public async Task An_expired_lock_is_only_taken_after_the_clock_skew_margin()
     {
         await AcquireAsync();
@@ -103,7 +117,7 @@ public sealed class IssuerLockTests
 
         Assert.Equal(LockState.ImpossibleExpiry, attempt.State);
         Assert.Null(attempt.Lock);
-        Assert.Equal(IssuerLock.KeyFor(Issuer), attempt.Key);
+        Assert.Equal(_clock.GetUtcNow().AddYears(1), attempt.HeldUntil);
     }
 
     [Fact]
@@ -121,15 +135,12 @@ public sealed class IssuerLockTests
     }
 
     [Fact]
-    public async Task Renewing_writes_early_when_less_than_the_minimum_remaining_is_left()
+    public async Task A_minimum_remaining_beyond_half_the_time_to_live_is_refused_because_it_could_not_be_honoured_by_waiting()
     {
-        var store = new FaultyObjectStore(_store);
-        var held = (await AcquireAsync(store)).Lock!;
-        store.FailNextReplace(Fault.Failure);
-        _clock.Advance(TimeSpan.FromMinutes(1));
+        var held = (await AcquireAsync()).Lock!;
 
-        Assert.True(await held.RenewIfDueAsync(Ttl - TimeSpan.FromMinutes(1) - TimeSpan.FromSeconds(1), Ct));
-        await Assert.ThrowsAsync<HttpRequestException>(() => held.RenewIfDueAsync(Ttl - TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1), Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => held.RenewIfDueAsync(Ttl / 2 + TimeSpan.FromSeconds(1), Ct));
+        Assert.True(await held.RenewIfDueAsync(Ttl / 2, Ct));
     }
 
     [Fact]
@@ -146,7 +157,9 @@ public sealed class IssuerLockTests
         Assert.IsType<HttpRequestException>(error.InnerException);
         Assert.Equal("The service is unavailable.", error.InnerException.Message);
         Assert.IsType<HttpRequestException>(error.ReadError);
-        Assert.Contains("The service is unavailable.", error.Message, StringComparison.Ordinal);
+        // Each error shows once in the chain the host prints: the write's as the inner one, the read's here.
+        Assert.Contains("The read failed.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("The service is unavailable.", error.Message, StringComparison.Ordinal);
         // The host (Program.cs) prints and exits with 1 on this type; anything else would crash unhandled.
         Assert.IsAssignableFrom<InvalidOperationException>(error);
     }
@@ -334,6 +347,32 @@ public sealed class IssuerLockTests
 
         Assert.True(await held.RenewAsync(Ct));
         Assert.True(await held.RenewAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_conflict_on_renewing_a_lock_with_less_than_the_minimum_remaining_loses_it_instead_of_letting_a_send_start()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(TimeSpan.FromMinutes(3));
+        store.FailNextReplace(Fault.Conflict);
+
+        // Two minutes are left of the five.
+        Assert.False(await held.RenewAsync(TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(1), Ct));
+
+        store.FailNextReplace(Fault.Conflict);
+        Assert.True(await held.RenewAsync(TimeSpan.FromMinutes(2), Ct));
+    }
+
+    [Fact]
+    public async Task A_conflict_on_a_due_renewal_that_leaves_less_than_the_send_margin_stops_the_run()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(Ttl - TimeSpan.FromSeconds(30));
+        store.FailNextReplace(Fault.Conflict);
+
+        Assert.False(await held.RenewIfDueAsync(Ttl / 2, Ct));
     }
 
     [Fact]

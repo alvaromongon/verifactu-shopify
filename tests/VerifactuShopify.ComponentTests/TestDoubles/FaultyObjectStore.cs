@@ -41,7 +41,7 @@ public sealed class FaultyObjectStore(IObjectStore inner) : IObjectStore
         if (_failNextRead)
         {
             _failNextRead = false;
-            throw new HttpRequestException("The service is unavailable.");
+            throw new HttpRequestException("The read failed.");
         }
 
         return inner.GetAsync(key, cancellationToken);

@@ -10,6 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\VerifactuShopify.ComponentTests\TestDoubles\ConsoleCapture.cs" LinkBase="TestDoubles\Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\VerifactuShopify\VerifactuShopify.csproj" />
   </ItemGroup>
 

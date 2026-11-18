@@ -14,6 +14,7 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
 {
     readonly S3Stub _s3 = new();
     readonly S3ObjectStore _store;
+    readonly List<string> _log = [];
 
     public S3ObjectStoreTests() =>
         _store = NewStore(new S3ObjectStoreOptions(S3Stub.Bucket, ServiceUrl: _s3.Url, ForcePathStyle: true));
@@ -26,8 +27,8 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
         _s3.Dispose();
     }
 
-    static S3ObjectStore NewStore(S3ObjectStoreOptions options) =>
-        S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"));
+    S3ObjectStore NewStore(S3ObjectStoreOptions options) =>
+        S3ObjectStore.Create(options, new BasicAWSCredentials("test-access-key", "test-secret-key"), _log.Add);
 
     [Fact]
     public async Task Create_if_absent_sends_if_none_match_star()
@@ -125,6 +126,43 @@ public sealed class S3ObjectStoreTests : ObjectStoreContractTests, IDisposable
         _s3.FailWith(404, code);
 
         Assert.Null(await Store.GetAsync("one.txt", Ct));
+    }
+
+    [Fact]
+    public async Task A_404_with_another_code_is_logged_with_its_code_and_request_id()
+    {
+        _s3.FailWith(404, "NotFound");
+
+        Assert.Null(await Store.GetAsync("one.txt", Ct));
+
+        var line = Assert.Single(_log);
+        Assert.Contains("one.txt", line, StringComparison.Ordinal);
+        Assert.Contains("'NotFound'", line, StringComparison.Ordinal);
+        Assert.Contains(S3Stub.RequestId, line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_missing_key_is_not_logged()
+    {
+        Assert.Null(await Store.GetAsync("one.txt", Ct));
+
+        Assert.Empty(_log);
+    }
+
+    [Fact]
+    public async Task A_404_with_another_code_on_a_conditional_replace_is_a_condition_not_met_like_a_missing_key_on_a_read()
+    {
+        _s3.FailWith(404, "NotFound");
+
+        Assert.Equal(WriteOutcome.ConditionNotMet, await Store.PutIfUnchangedAsync("lock", Bytes("v"), "\"abc\"", Ct));
+    }
+
+    [Fact]
+    public async Task A_404_with_another_code_on_a_create_if_absent_is_an_error()
+    {
+        _s3.FailWith(404, "NotFound");
+
+        await Assert.ThrowsAsync<AmazonS3Exception>(() => Store.PutIfAbsentAsync("lock", Bytes("v"), Ct));
     }
 
     [Fact]

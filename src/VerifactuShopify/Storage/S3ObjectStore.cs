@@ -31,12 +31,14 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
     readonly IAmazonS3 _client;
     readonly IAmazonS3 _conditionalClient;
     readonly string _bucket;
+    readonly Action<string> _log;
 
-    S3ObjectStore(IAmazonS3 client, IAmazonS3 conditionalClient, string bucket)
+    S3ObjectStore(IAmazonS3 client, IAmazonS3 conditionalClient, string bucket, Action<string> log)
     {
         _client = client;
         _conditionalClient = conditionalClient;
         _bucket = bucket;
+        _log = log;
     }
 
     /// <summary>Releases the two clients.</summary>
@@ -48,9 +50,11 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
 
     /// <summary>
     /// Builds a store. Without <paramref name="credentials"/> it uses the SDK's default chain
-    /// (environment, profile, role...), which is what a deployment does.
+    /// (environment, profile, role...), which is what a deployment does. A read that finds a 404 other than
+    /// <c>NoSuchKey</c> is taken as a missing object and reported to <paramref name="log"/> (standard error
+    /// when omitted), so a provider answering something else is noticed.
     /// </summary>
-    public static S3ObjectStore Create(S3ObjectStoreOptions options, AWSCredentials? credentials = null)
+    public static S3ObjectStore Create(S3ObjectStoreOptions options, AWSCredentials? credentials = null, Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -58,7 +62,7 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
         var conditionalConfig = NewConfig(options);
         conditionalConfig.MaxErrorRetry = 0;
 
-        return new S3ObjectStore(NewClient(credentials, config), NewClient(credentials, conditionalConfig), options.Bucket);
+        return new S3ObjectStore(NewClient(credentials, config), NewClient(credentials, conditionalConfig), options.Bucket, log ?? Console.Error.WriteLine);
     }
 
     static AmazonS3Client NewClient(AWSCredentials? credentials, AmazonS3Config config) =>
@@ -97,10 +101,13 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
             await response.ResponseStream.CopyToAsync(content, cancellationToken);
             return new StoredObject(content.ToArray(), response.ETag);
         }
-        catch (AmazonS3Exception error) when (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode != "NoSuchBucket")
+        catch (AmazonS3Exception error) when (IsMissingKey(error))
         {
-            // A missing key. Compatible providers answer it with other codes, or with no body, so any 404
-            // counts except a missing bucket (NoSuchBucket), a configuration error that must surface.
+            if (error.ErrorCode != NoSuchKey)
+            {
+                _log($"S3: la lectura de '{key}' respondió 404 con el código '{error.ErrorCode}' (RequestId {error.RequestId}); se toma como objeto inexistente.");
+            }
+
             return null;
         }
     }
@@ -120,7 +127,7 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
 
     public async Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(eTag);
+        ETagCondition.Require(eTag);
         var request = NewPut(key, content);
         request.IfMatch = eTag;
         return await PutConditionalAsync(request, cancellationToken);
@@ -158,9 +165,10 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
         BucketName = _bucket,
         Key = key,
         // The request owns its stream and disposes it when the call ends. It reads the caller's buffer in
-        // place when it can: the content is not modified while the call runs.
-        InputStream = MemoryMarshal.TryGetArray(content, out var segment) && segment.Array is not null
-            ? new MemoryStream(segment.Array, segment.Offset, segment.Count, writable: false)
+        // place when it can (a successful TryGetArray always has an array): the content is not modified while
+        // the call runs.
+        InputStream = MemoryMarshal.TryGetArray(content, out var segment)
+            ? new MemoryStream(segment.Array!, segment.Offset, segment.Count, writable: false)
             : new MemoryStream(content.ToArray()),
     };
 
@@ -187,10 +195,17 @@ public sealed class S3ObjectStore : IObjectStore, IDisposable
 
     // 412 is the failed condition. A concurrent conditional write to the same key is answered with
     // 409 ConditionalRequestConflict: somebody else is writing it, which for a lock is the same thing.
-    // Replacing "if unchanged" an object that no longer exists (404 NoSuchKey) means it changed; any other
-    // 404 (NoSuchBucket) is a configuration error.
+    // Replacing "if unchanged" an object that no longer exists means it changed, so it fails closed as a
+    // lost condition whatever 404 code the provider uses for it (see IsMissingKey).
     static bool ConditionNotMet(AmazonS3Exception error, PutObjectRequest request) =>
         error.StatusCode == HttpStatusCode.PreconditionFailed
         || (error.StatusCode == HttpStatusCode.Conflict && error.ErrorCode == "ConditionalRequestConflict")
-        || (error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode == "NoSuchKey" && request.IfMatch is not null);
+        || (IsMissingKey(error) && request.IfMatch is not null);
+
+    // A missing key. Compatible providers answer it with other codes, or with no body, so any 404 counts
+    // except a missing bucket (NoSuchBucket), a configuration error that must surface.
+    static bool IsMissingKey(AmazonS3Exception error) =>
+        error.StatusCode == HttpStatusCode.NotFound && error.ErrorCode != "NoSuchBucket";
+
+    const string NoSuchKey = "NoSuchKey";
 }
