@@ -27,8 +27,8 @@
          later 2.3.x). Drop this pin once WireMock.Net requires a patched one. -->
     <PackageVersion Include="Microsoft.AspNetCore.WebUtilities" Version="2.3.14" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
-    <PackageVersion Include="WireMock.Net" Version="2.18.0" />
-    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.1" />
+    <PackageVersion Include="WireMock.Net" Version="2.31.0" />
+    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.3" />
   </ItemGroup>
 
 </Project>
