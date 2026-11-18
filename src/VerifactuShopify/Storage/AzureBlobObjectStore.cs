@@ -108,6 +108,8 @@ public sealed class AzureBlobObjectStore : IObjectStore
         }
         catch (RequestFailedException error) when (error.Status == 404 && error.ErrorCode == BlobErrorCode.BlobNotFound)
         {
+            // Deleting a missing blob is a success: the key is already gone.
+            return;
         }
     }
 

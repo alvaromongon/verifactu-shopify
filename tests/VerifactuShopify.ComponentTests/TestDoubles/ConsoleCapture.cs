@@ -1,8 +1,8 @@
 namespace VerifactuShopify.ComponentTests.TestDoubles;
 
 // Redirects the console's output and error to strings until it is disposed, restoring them afterwards.
-// The console is process-wide: whoever uses it must be in the VeriFactu collection (see
-// VeriFactuSettingsCollection), which does not run in parallel with the others.
+// The console is process-wide: whoever uses it must be in a VeriFactu collection (VeriFactuCollection here,
+// VeriFactuSettingsCollection in the unit tests), which does not run in parallel with the others.
 public sealed class ConsoleCapture : IDisposable
 {
     readonly StringWriter _output = new();
