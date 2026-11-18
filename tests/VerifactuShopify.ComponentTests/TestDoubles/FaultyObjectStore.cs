@@ -26,18 +26,26 @@ public sealed class FaultyObjectStore(IObjectStore inner) : IObjectStore
 {
     Fault? _next;
     Fault? _nextReplace;
-
-    // Runs once, just before the next replace-if-unchanged: lets a test change the world between the
-    // moment the caller read an ETag and the moment it uses it.
-    public Func<Task>? BeforeNextReplace { get; set; }
+    bool _failNextRead;
 
     public void FailNextConditionalWrite(Fault fault) => _next = fault;
+
+    // The next read throws, as when the service is down for the check that follows a failed write.
+    public void FailNextRead() => _failNextRead = true;
 
     // Like FailNextConditionalWrite, but waits for the next replace-if-unchanged and lets create-if-absent through.
     public void FailNextReplace(Fault fault) => _nextReplace = fault;
 
-    public Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default) =>
-        inner.GetAsync(key, cancellationToken);
+    public Task<StoredObject?> GetAsync(string key, CancellationToken cancellationToken = default)
+    {
+        if (_failNextRead)
+        {
+            _failNextRead = false;
+            throw new HttpRequestException("The service is unavailable.");
+        }
+
+        return inner.GetAsync(key, cancellationToken);
+    }
 
     public Task<string> PutAsync(string key, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default) =>
         inner.PutAsync(key, content, cancellationToken);
@@ -48,13 +56,6 @@ public sealed class FaultyObjectStore(IObjectStore inner) : IObjectStore
     public Task<WriteOutcome> PutIfUnchangedAsync(string key, ReadOnlyMemory<byte> content, string eTag, CancellationToken cancellationToken = default) =>
         WithFault(_nextReplace is null ? null : TakeReplaceFault(), async () =>
         {
-            var before = BeforeNextReplace;
-            BeforeNextReplace = null;
-            if (before is not null)
-            {
-                await before();
-            }
-
             return await inner.PutIfUnchangedAsync(key, content, eTag, cancellationToken);
         });
 

@@ -21,12 +21,12 @@ public sealed class OrderSyncTests : IDisposable
     readonly InMemoryObjectStore _locks = new();
     readonly FakeClock _clock = new(Now);
 
-    async Task<int> RunAsync(string sellerNif, Dictionary<string, string?>? overrides = null, IObjectStore? lockStore = null)
+    async Task<int> RunAsync(string sellerNif, Dictionary<string, string?>? overrides = null, IObjectStore? lockStore = null, Action? onShopifyRequest = null)
     {
         _sellers.Add(sellerNif);
         var configuration = SyncConfiguration.Create(sellerNif, overrides);
         var sistema = SistemaInformaticoSetup.Configure(configuration);
-        using var http = _shopify.CreateClient();
+        using var http = _shopify.CreateClient(onShopifyRequest);
         return await OrderSync.RunAsync(configuration, sistema, http, Now, lockStore, _clock);
     }
 
@@ -261,7 +261,7 @@ public sealed class OrderSyncTests : IDisposable
         const string SellerNif = "00000025E";
         _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
         await AnotherRunHoldsTheLockAsync(SellerNif);
-        _clock.Advance(OrderSync.LockTimeToLive);
+        _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
 
         var exitCode = await RunAsync(SellerNif, lockStore: _locks);
 
@@ -270,23 +270,92 @@ public sealed class OrderSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_that_finds_the_lock_taken_over_right_before_a_send_does_not_send()
+    {
+        const string SellerNif = "00000027G";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        // The listing passes its check; the run stalls while Shopify answers the order and another run takes the lock.
+        var requests = 0;
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        {
+            if (++requests != 3)
+            {
+                return;
+            }
+
+            _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
+            AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
+        }));
+
+        Assert.True(requests >= 3);
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Empty(_aeat.Altas());
+        Assert.Contains("(#1001 (1))", output, StringComparison.Ordinal);
+        Assert.Contains("ya es de otra ejecución", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_run_that_finds_the_lock_taken_over_while_it_works_stops_before_sending()
     {
         const string SellerNif = "00000026F";
         _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
-        var locks = new FaultyObjectStore(_locks);
-        // The run stalls past the expiry before its first send and another run takes the lock.
-        locks.BeforeNextReplace = async () =>
-        {
-            _clock.Advance(OrderSync.LockTimeToLive);
-            await AnotherRunHoldsTheLockAsync(SellerNif);
-        };
+        // The run stalls past the expiry while Shopify answers, and another run takes the lock.
+        var stalled = false;
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: locks));
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        {
+            if (stalled)
+            {
+                return;
+            }
+
+            stalled = true;
+            _clock.Advance(OrderSync.LockTimeToLive + IssuerLock.ClockSkewMargin);
+            AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult();
+        }));
 
         Assert.Equal(OrderSync.Failure, exitCode);
         Assert.Empty(_aeat.Altas());
-        Assert.Contains("el cerrojo ya es de otra ejecución", output, StringComparison.Ordinal);
+        Assert.Contains("ya es de otra ejecución", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_read_phase_longer_than_the_expiry_keeps_the_lock_by_renewing_it()
+    {
+        const string SellerNif = "00000028H";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        // Every Shopify call (token, list, order) takes 4 minutes of the 10 of the lock, and at each one
+        // another run tries to take it.
+        var others = new List<LockState>();
+
+        var exitCode = await RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        {
+            _clock.Advance(TimeSpan.FromMinutes(4));
+            others.Add(AnotherRunHoldsTheLockAsync(SellerNif).GetAwaiter().GetResult().State);
+        });
+
+        Assert.Equal(OrderSync.Success, exitCode);
+        Assert.Single(_aeat.Altas());
+        Assert.NotEmpty(others);
+        Assert.All(others, state => Assert.Equal(LockState.Held, state));
+    }
+
+    [Fact]
+    public async Task A_lock_with_an_impossible_expiry_fails_the_run_naming_the_object_without_taking_it()
+    {
+        const string SellerNif = "00000029J";
+        _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
+        var year = $$"""{"owner":"someone","expiresAt":"{{_clock.GetUtcNow().AddYears(1):O}}"}""";
+        await _locks.PutAsync(IssuerLock.KeyFor(SellerNif), System.Text.Encoding.UTF8.GetBytes(year), TestContext.Current.CancellationToken);
+
+        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks));
+
+        Assert.Equal(OrderSync.Failure, exitCode);
+        Assert.Contains(IssuerLock.KeyFor(SellerNif), output, StringComparison.Ordinal);
+        Assert.Contains("reloj", output, StringComparison.Ordinal);
+        Assert.Empty(_aeat.Altas());
+        Assert.Equal(0, _aeat.Consultas());
     }
 
     [Fact]

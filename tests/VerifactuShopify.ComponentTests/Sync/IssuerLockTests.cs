@@ -64,7 +64,7 @@ public sealed class IssuerLockTests
     public async Task An_expired_lock_is_taken_over_and_the_previous_holder_finds_out_when_it_renews()
     {
         var first = (await AcquireAsync()).Lock!;
-        _clock.Advance(Ttl);
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin);
 
         var second = await AcquireAsync();
 
@@ -79,6 +79,76 @@ public sealed class IssuerLockTests
         _clock.Advance(Ttl - TimeSpan.FromSeconds(1));
 
         Assert.Equal(LockState.Held, (await AcquireAsync()).State);
+    }
+
+    [Fact]
+    public async Task An_expired_lock_is_only_taken_after_the_clock_skew_margin()
+    {
+        await AcquireAsync();
+
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin - TimeSpan.FromSeconds(1));
+        Assert.Equal(LockState.Held, (await AcquireAsync()).State);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(LockState.Acquired, (await AcquireAsync()).State);
+    }
+
+    [Fact]
+    public async Task A_lock_expiring_further_away_than_possible_is_neither_taken_nor_called_held()
+    {
+        var far = $$"""{"owner":"someone","expiresAt":"{{_clock.GetUtcNow().AddYears(1):O}}"}""";
+        await _store.PutAsync(IssuerLock.KeyFor(Issuer), Encoding.UTF8.GetBytes(far), Ct);
+
+        var attempt = await AcquireAsync();
+
+        Assert.Equal(LockState.ImpossibleExpiry, attempt.State);
+        Assert.Null(attempt.Lock);
+        Assert.Equal(IssuerLock.KeyFor(Issuer), attempt.Key);
+    }
+
+    [Fact]
+    public async Task Renewing_only_writes_when_half_the_time_to_live_has_passed()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        store.FailNextReplace(Fault.Failure);
+
+        _clock.Advance(Ttl / 2 - TimeSpan.FromSeconds(1));
+        Assert.True(await held.RenewIfDueAsync(TimeSpan.Zero, Ct));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAsync<HttpRequestException>(() => held.RenewIfDueAsync(TimeSpan.Zero, Ct));
+    }
+
+    [Fact]
+    public async Task Renewing_writes_early_when_less_than_the_minimum_remaining_is_left()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        store.FailNextReplace(Fault.Failure);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.True(await held.RenewIfDueAsync(Ttl - TimeSpan.FromMinutes(1) - TimeSpan.FromSeconds(1), Ct));
+        await Assert.ThrowsAsync<HttpRequestException>(() => held.RenewIfDueAsync(Ttl - TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1), Ct));
+    }
+
+    [Fact]
+    public async Task A_failed_write_whose_read_back_also_fails_reports_the_write_error_as_cause_and_keeps_the_read_one()
+    {
+        var store = new FaultyObjectStore(_store);
+        var held = (await AcquireAsync(store)).Lock!;
+        _clock.Advance(Ttl / 2);
+        store.FailNextReplace(Fault.Failure);
+        store.FailNextRead();
+
+        var error = await Assert.ThrowsAsync<LockWriteException>(() => held.RenewAsync(Ct));
+
+        Assert.IsType<HttpRequestException>(error.InnerException);
+        Assert.Equal("The service is unavailable.", error.InnerException.Message);
+        Assert.IsType<HttpRequestException>(error.ReadError);
+        Assert.Contains("The service is unavailable.", error.Message, StringComparison.Ordinal);
+        // The host (Program.cs) prints and exits with 1 on this type; anything else would crash unhandled.
+        Assert.IsAssignableFrom<InvalidOperationException>(error);
     }
 
     [Fact]
@@ -109,7 +179,7 @@ public sealed class IssuerLockTests
     public async Task Releasing_after_losing_the_lock_does_not_free_the_new_holder()
     {
         var first = (await AcquireAsync()).Lock!;
-        _clock.Advance(Ttl);
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin);
         await AcquireAsync();
 
         await first.ReleaseAsync(Ct);
@@ -223,7 +293,7 @@ public sealed class IssuerLockTests
     public async Task A_failed_write_on_taking_over_an_expired_lock_is_an_error_not_a_skip()
     {
         await AcquireAsync();
-        _clock.Advance(Ttl);
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin);
         var store = new FaultyObjectStore(_store);
         store.FailNextReplace(Fault.Failure);
 
@@ -245,7 +315,7 @@ public sealed class IssuerLockTests
     public async Task A_lost_response_on_taking_over_an_expired_lock_is_read_back_and_the_lock_counts_as_won()
     {
         await AcquireAsync();
-        _clock.Advance(Ttl);
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin);
         var store = new FaultyObjectStore(_store);
         store.FailNextReplace(Fault.LostResponse);
 
@@ -282,7 +352,7 @@ public sealed class IssuerLockTests
     {
         var store = new FaultyObjectStore(_store);
         var held = (await AcquireAsync(store)).Lock!;
-        _clock.Advance(Ttl);
+        _clock.Advance(Ttl + IssuerLock.ClockSkewMargin);
         await AcquireAsync();
         store.FailNextReplace(Fault.Conflict);
 
