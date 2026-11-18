@@ -184,21 +184,6 @@ public sealed class OrderSyncTests : IDisposable
         Assert.Contains("read_orders", error.Message, StringComparison.Ordinal);
     }
 
-    static async Task<(int ExitCode, string Output)> CapturingOutputAsync(Func<Task<int>> run)
-    {
-        var original = Console.Out;
-        using var captured = new StringWriter();
-        Console.SetOut(captured);
-        try
-        {
-            return (await run(), captured.ToString());
-        }
-        finally
-        {
-            Console.SetOut(original);
-        }
-    }
-
     Task<LockAcquisition> AnotherRunHoldsTheLockAsync(string sellerNif) =>
         IssuerLock.TryAcquireAsync(_locks, sellerNif, OrderSync.LockTimeToLive, _clock, TestContext.Current.CancellationToken);
 
@@ -209,7 +194,7 @@ public sealed class OrderSyncTests : IDisposable
         _shopify.GivenPaidOrders(("1", "#1001", PaidAt)).GivenOrder("1", Orders.Json("1", "#1001"));
         await AnotherRunHoldsTheLockAsync(SellerNif);
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks));
+        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks));
 
         Assert.Equal(OrderSync.Success, exitCode);
         Assert.Contains("ocupado por otra ejecución", output, StringComparison.Ordinal);
@@ -277,7 +262,7 @@ public sealed class OrderSyncTests : IDisposable
         // The listing passes its check; the run stalls while Shopify answers the order and another run takes the lock.
         var requests = 0;
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
         {
             if (++requests != 3)
             {
@@ -303,7 +288,7 @@ public sealed class OrderSyncTests : IDisposable
         // The run stalls past the expiry while Shopify answers, and another run takes the lock.
         var stalled = false;
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
+        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks, onShopifyRequest: () =>
         {
             if (stalled)
             {
@@ -349,7 +334,7 @@ public sealed class OrderSyncTests : IDisposable
         var year = $$"""{"owner":"someone","expiresAt":"{{_clock.GetUtcNow().AddYears(1):O}}"}""";
         await _locks.PutAsync(IssuerLock.KeyFor(SellerNif), System.Text.Encoding.UTF8.GetBytes(year), TestContext.Current.CancellationToken);
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: _locks));
+        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: _locks));
 
         Assert.Equal(OrderSync.Failure, exitCode);
         Assert.Contains(IssuerLock.KeyFor(SellerNif), output, StringComparison.Ordinal);
@@ -366,7 +351,7 @@ public sealed class OrderSyncTests : IDisposable
         var locks = new FaultyObjectStore(_locks);
         locks.FailNextConditionalWrite(Fault.Conflict);
 
-        var (exitCode, output) = await CapturingOutputAsync(() => RunAsync(SellerNif, lockStore: locks));
+        var (exitCode, output) = await ConsoleCapture.RunAsync(() => RunAsync(SellerNif, lockStore: locks));
 
         Assert.Equal(OrderSync.Success, exitCode);
         Assert.Contains("conflicto al adquirirlo", output, StringComparison.Ordinal);

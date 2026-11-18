@@ -44,7 +44,7 @@ public static class OrderSync
         if (lockStore is null)
         {
             Console.WriteLine("Cerrojo:     sin almacén configurado, no se comprueba que no haya otra ejecución a la vez");
-            return await SyncAsync(configuration, sistema, http, now, held: null);
+            return await SyncAsync(configuration, sellerNif, sistema, http, now, held: null);
         }
 
         // Before anything else: not even the chain is loaded while another run may be sending.
@@ -67,7 +67,7 @@ public static class OrderSync
         var held = attempt.Lock!;
         try
         {
-            return await SyncAsync(configuration, sistema, http, now, held);
+            return await SyncAsync(configuration, sellerNif, sistema, http, now, held);
         }
         finally
         {
@@ -88,10 +88,9 @@ public static class OrderSync
         }
     }
 
-    static async Task<int> SyncAsync(IConfiguration configuration, SistemaInformatico sistema, HttpClient http, DateTimeOffset now, IssuerLock? held)
+    static async Task<int> SyncAsync(IConfiguration configuration, string sellerNif, SistemaInformatico sistema, HttpClient http, DateTimeOffset now, IssuerLock? held)
     {
         var settings = SyncSettings.From(configuration);
-        var sellerNif = configuration.GetRequired(VerifactuShopify.Configuration.ConfigurationExtensions.SellerNifKey);
         var sellerName = configuration.GetRequired(VerifactuShopify.Configuration.ConfigurationExtensions.SellerNameKey);
 
         // AEAT first: the same query gives the chain head, the orders already invoiced and the

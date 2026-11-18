@@ -14,27 +14,20 @@ public static class ConnectorProcess
     public static Result Run(Dictionary<string, string?> environment, params string[] args)
     {
         var entryPoint = typeof(OrderSync).Assembly.EntryPoint!;
-        using var output = new StringWriter();
-        using var error = new StringWriter();
-        var (originalOutput, originalError) = (Console.Out, Console.Error);
         var endpoint = Settings.Current.VeriFactuEndPointPrefix;
         foreach (var (key, value) in environment)
         {
             Environment.SetEnvironmentVariable(key, value);
         }
 
-        Console.SetOut(output);
-        Console.SetError(error);
         try
         {
             // The compiler wraps the async top-level statements in a synchronous Main.
-            var exitCode = (int)entryPoint.Invoke(null, [args])!;
-            return new Result(exitCode, output.ToString(), error.ToString());
+            var (exitCode, output, error) = ConsoleCapture.Run(() => (int)entryPoint.Invoke(null, [args])!);
+            return new Result(exitCode, output, error);
         }
         finally
         {
-            Console.SetOut(originalOutput);
-            Console.SetError(originalError);
             foreach (var key in environment.Keys)
             {
                 Environment.SetEnvironmentVariable(key, null);
